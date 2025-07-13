@@ -91,4 +91,4 @@ async def reveal(ctx):
 
 
 # Insert your actual token below
-bot.run("MTM5MzE2NDA2NTQxMjQ4MTA4Nw.GZwYSd.rCi_hOUltRcp8oqpP7KKUtAL8QPOKz1fXLIH7o")
+bot.run("MTM5MzE2NDA2NTQxMjQ4MTA4Nw.GQ47fC.-8eFp0StwnHo_JEXWfaGJbw54OXHQ_QpbSbQ3Y")

@@ -10,7 +10,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # Define categories and message pools
 responses = {
     "lonely": [
-        "You're not alone — I'm here for you 💕, and so are the residents!",
+        "I'm sorry you're feeling lonely. Know that you're not alone — I'm here for you 💕, and so are the residents! You should try and reach out to them!",
         "Never forget that loneliness doesn’t mean you're unlovable. You are deeply worthy of connection.",
         "I'm so sorry things feel heavy right now. Loneliness can ache in indescribeable ways. Try journaling or taking a short walk; sometimes being with yourself and appreciating your own company can be healing.",
         "Even on quiet days, your presence still matters. You are a part of this community, and we care about you. Shoot a resident a message!",
@@ -18,7 +18,7 @@ responses = {
         "You matter to people; your presence has immense value. Say hi to someone in the lounge! 💕",
         "I see you, even if others don't right now. Your feelings are valid. Talk about some positive things that've happened recently to distract yourself.",
         "Let's do some grounding. List three things you can see, hear, and feel right now. Stay present, and remember you won't always feel this way.",
-        "You deserve way more connection than you've been given, which is totally human. To feel is to be alive, even if it might hurt. I see you and hear you.",
+        "You deserve way more connection than you've been given, and it is totally human to feel lonely. To feel is to be alive, even if it might hurt. I see you and hear you.",
         "Sometimes loneliness must persist because the world is preparing us for the right kind of presence. Be patient and try to find some enjoyment in your own company!",
     ],
     "dysmorphia": [
@@ -58,10 +58,24 @@ responses = {
         "It doesn't feel like it now, but this shitty moment will pass. You are stronger than these emotions.",
     ],
     "addiction": [
-        "You are not your addiction. You are a person with value, who simply requires support and understanding.",
-        "Recovery is a journey, not a destination. Every step you take is a step towards healing.",
+        "You are not your addiction. You are a person with value, who simply requires support and understanding. There are many reasons why we turn to substances; would you like to share some of yours?",
+        "Recovery is a journey, not a destination. Every step you take is a step towards healing, and progress isn't linear. I'm proud of you for trying to get better.",
         "I am so proud of you for acknowledging your struggle. It takes immense courage to face addiction. Do you need to rant?",
         "Take a second to think about something similar to your substance of choice. What are some hobbies that release the same dopamine?",
+        "The fact that you want different for yourself is a huge step in your recovery journey. I'm proud of you. Future you is thanking you in several different ways right now.",
+        "Only after destroying yourself can you understand yourself. You're not alone in this. Keep going.",
+        "Sometimes it's just not possible to quit cold turkey, and that's okay. Sometimes people need to get sick of it, and you're not there yet! Don't compare yourself; you are fully capable, but you decide when you're ready.",
+        "Your sobriety won't happen overnight. Start small and stay kind to yourself. Expecting to see huge results limits your appreciation for your small achievements.",
+        "Your worst day clean is better than your best day high. Don't lose sight of yourself chasing a fake feeling.",
+        "Remember that little kid you used to be - they are so proud you're still here, fighting the fight that has destroyed you for so long. Keep them proud, and don't participate in the destruction of yourself. Reach out to someone who cares.",
+    ],
+    "attention": [
+        "You are worthy of love and attention, even if it feels like you're not getting it. You're a diamond in the rough, super funny, and probably smarter than your parents.",
+        "Who the hell isn't paying attention to you? You deserve to be seen and heard. Let's change that. How was your day?",
+        "Sometimes we all need a little extra love. You are not alone in this feeling. I'm here to listen.",
+        "You are not invisible. Your presence matters, and you deserve to be acknowledged.",
+        "It's okay to want attention. We all crave connection. How about we chat about something you love?",
+        "What do you need attention for? I'm here to give you a moment to shine. Let's talk about your interests or passions.",
     ],
 
 }
@@ -97,6 +111,11 @@ async def addiction(ctx):
     msg = random.choice(responses["addiction"])
     await ctx.send(msg)
 
+@bot.command()
+async def attention(ctx):
+    msg = random.choice(responses["attention"])
+    await ctx.send(msg)
+
 # Optional: generic fallback command
 @bot.command()
 async def sad(ctx, topic=None):
@@ -107,4 +126,4 @@ async def sad(ctx, topic=None):
         await ctx.send("Sorry, I don’t have sad messages for that topic yet.")
 
 
-bot.run('MTM5MzYzNTg5NzA4OTU4OTM3OQ.GOBsCl.sGIokfAU3c6HknCexXb96WsyJdMz1ZF9llGnrI')
+bot.run('MTM5MzYzNTg5NzA4OTU4OTM3OQ.G4QG9I.3D_fNjUDVnT1k_Xf3mx7aUnX3SeFw7Dt-mlZa0')
