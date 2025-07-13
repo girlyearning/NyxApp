@@ -126,4 +126,6 @@ async def sad(ctx, topic=None):
         await ctx.send("Sorry, I don’t have sad messages for that topic yet.")
 
 
-bot.run('MTM5MzYzNTg5NzA4OTU4OTM3OQ.G4QG9I.3D_fNjUDVnT1k_Xf3mx7aUnX3SeFw7Dt-mlZa0')
+import os
+bot.run(os.getenv("DISCORD_TOKEN"))
+# Make sure to set your DISCORD_TOKEN in your environment variables
