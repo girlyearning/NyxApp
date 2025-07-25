@@ -1,683 +1,710 @@
-import discord
-import random
-import asyncio
-import json
 import os
-from discord.ext import commands, tasks
+import asyncio
 from dotenv import load_dotenv
-load_dotenv()
-from openai import OpenAI
-from collections import defaultdict
-from typing import Dict, List
-conversation_history = {}
-DISK_PATH = os.getenv("PIKA_DISK_MOUNT_PATH", "var/data")
-PIKA_FILE = os.path.join(DISK_PATH, "pikapoints.json")
-assert os.path.isdir(DISK_PATH), f"Disk path {DISK_PATH} not found!"
+import discord
+from discord.ext import commands, tasks
+import json
+import time
+import pathlib
+import random
+from threading import Lock
+from pathlib import Path
 
+from anthropic import Anthropic
+from utils import create_pikabug_embed, DiscordLogger
+from datetime import datetime, timezone
+
+# ─── Constants ─────────────────────────────────────────────
+DISK_PATH = Path("data")
+PIKA_FILE = DISK_PATH / "pikapoints.json"
+COMFORT_HISTORY_FILE = DISK_PATH / "comfort_history.json"
+MAX_COMFORT_ENTRIES = 100
+COMFORT_SUMMARY_INTERVAL = 10
+CONVERSATION_LIMIT = 50
+
+# ─── Check-In State/Vars ─────────────────────────────────────────────
+CHECKIN_MESSAGES_FILE = os.path.join(os.path.dirname(__file__), "checkin_messages.txt")
+CHECK_IN_STATE_FILE = DISK_PATH / "check_in_state.json"
+CHECK_IN_CHANNEL_ID = 1392091878748459048  # Set to your check-in channel ID
+CHECK_IN_INTERVAL = 43200  # 12 hours in seconds
+
+if os.path.exists(CHECKIN_MESSAGES_FILE):
+    with open(CHECKIN_MESSAGES_FILE, encoding="utf-8") as f:
+        check_in_messages = [line.strip() for line in f if line.strip()]
+else:
+    check_in_messages = [
+        "How are you feeling today? 💙",
+        "Remember to take breaks and stay hydrated! 💧",
+        "You're doing great, keep going! ✨",
+        "How's your mental health today? 💚",
+        "Don't forget to be kind to yourself today! 🌟",
+        "How are you managing stress lately? 🧘‍♀️",
+        "Remember, it's okay to not be okay sometimes 💛",
+        "What's something positive that happened today?"
+    ]
+
+def get_default_check_in_state():
+        return {
+        "last_sent": 0,
+        "last_index": -1,
+        "order": list(range(len(check_in_messages)))
+    }
+
+def load_check_in_state():
+    if CHECK_IN_STATE_FILE.exists():
+        with open(CHECK_IN_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    else:
+        state = get_default_check_in_state()
+        save_check_in_state(state)
+        return state
+
+def save_check_in_state(state):
+    CHECK_IN_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(CHECK_IN_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"Error saving check-in state: {e}")
+
+check_in_state = load_check_in_state()
+
+# ─── Hot Take State/Vars ─────────────────────────────────────────────
+HOT_TAKE_FILE = os.path.join(os.path.dirname(__file__), "hot_takes.txt")
+if os.path.exists(HOT_TAKE_FILE):
+    with open(HOT_TAKE_FILE, encoding="utf-8") as f:
+        hot_takes = [line.strip() for line in f if line.strip()]
+
+HOT_TAKE_STATE_FILE = DISK_PATH / "hot_take_state.json"
+HOT_TAKE_CHANNEL_ID = 1392813388286918696
+HOT_TAKE_INTERVAL = 86400  # 24 hours in seconds
+
+def get_default_hot_take_state():
+    return {
+        "last_sent": 0,
+        "last_index": -1,
+        "order": list(range(len(hot_takes)))
+    }
+
+def load_hot_take_state():
+    if HOT_TAKE_STATE_FILE.exists():
+        with open(HOT_TAKE_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    else:
+        state = get_default_hot_take_state()
+        save_hot_take_state(state)
+        return state
+
+def save_hot_take_state(state):
+    HOT_TAKE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(HOT_TAKE_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"Error saving hot take state: {e}")
+
+hot_take_state = load_hot_take_state()
+
+# ─── QOTD State/Vars ─────────────────────────────────────────────
+QOTD_FILE = os.path.join(os.path.dirname(__file__), "qotd.txt")
+QOTD_STATE_FILE = DISK_PATH / "qotd_state.json"
+QOTD_CHANNEL_ID = 1398265205443788841  # QOTD channel ID
+QOTD_INTERVAL = 86400  # 24 hours in seconds
+
+if os.path.exists(QOTD_FILE):
+    with open(QOTD_FILE, encoding="utf-8") as f:
+        qotd_questions = [line.strip() for line in f if line.strip()]
+else:
+    qotd_questions = [
+        "What version of yourself are you protecting by staying angry? What might you discover if you let that guard down for a second? Which behaviors trigger you the most—and what do they reflect about your own inner landscape?"
+    ]
+
+def get_default_qotd_state():
+    return {
+        "last_sent": 0,
+        "last_index": -1,
+        "order": list(range(len(qotd_questions)))
+    }
+
+def load_qotd_state():
+    if QOTD_STATE_FILE.exists():
+        with open(QOTD_STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    else:
+        state = get_default_qotd_state()
+        save_qotd_state(state)
+        return state
+
+def save_qotd_state(state):
+    QOTD_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(QOTD_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print(f"Error saving QOTD state: {e}")
+
+qotd_state = load_qotd_state()
+
+# ─── Environment & Clients ───────────────────────────────────────
+load_dotenv()
+token = os.getenv("DISCORD_TOKEN")
+if not token:
+    raise ValueError("DISCORD_TOKEN environment variable is not set")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+if not ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+
+client = Anthropic(api_key=ANTHROPIC_API_KEY)
+
+# ─── Word Games Wordlist ─────────────────────────────────────────
+BASE_DIR = pathlib.Path(__file__).parent
+with open(BASE_DIR / "words_alpha.txt", encoding="utf-8") as f:
+    valid_words = {line.strip().lower() for line in f if line.strip()}
+
+# ─── In‐Memory Session State ─────────────────────────────────────
+# Global session states shared across cogs
+conversation_history      = {}
+chat_sessions             = {}
+active_dm_sessions        = {}
+active_comfort_sessions   = {}
+
+# ─── Thread‐Safe Locks ────────────────────────────────────────────
+conversation_lock = asyncio.Lock()
+session_lock      = asyncio.Lock()
+memory_lock       = asyncio.Lock()
+thread_lock       = Lock()
+
+# ─── Bot & Intents ───────────────────────────────────────────────
 intents = discord.Intents.default()
 intents.message_content = True
-intents.reactions = True
-intents.guilds = True
+intents.reactions       = True
+intents.guilds          = True
+
+LOG_CHANNEL_ID = 1388809359206780998
 
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-# ─── PikaPoints Data ─────────────────────────────────────────────────
-
-# PikaPoints reward values
-JOURNAL_POINTS = 15
-PREFIXGAME_POINTS = 5
-UNSCRAMBLE_POINTS = 5
-
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-
-
-def load_pikapoints():
-   # If file doesn’t exist yet, initialize it
-   if not os.path.exists(PIKA_FILE):
-       with open(PIKA_FILE, "w") as f:
-           json.dump({}, f)
-   with open(PIKA_FILE, "r") as f:
-       return json.load(f)
-
-def save_pikapoints(data: dict):
-   # Overwrite file atomically
-   with open(PIKA_FILE, "w") as f:
-       json.dump(data, f)
-       f.flush()
-       os.fsync(f.fileno())
-
-pika_data = load_pikapoints()
-
-def get_user_record(guild_id: str, user_id: str):
-   """Ensure a record exists and return it."""
-   guild = pika_data.setdefault(guild_id, {})
-   return guild.setdefault(user_id, {
-       "points": 0,
-       "journal_submissions": 0,
-       "prefixgame_submissions": 0,
-       "unscramble_submissions": 0
-   })
-
-# ChatGPT function
-@bot.command(name="ask")
-async def ask(ctx, *, prompt):
-   thinking_msg = await ctx.send("Thinking...")
-   user_key = f"{ctx.guild.id}-{ctx.author.id}"
-
-
-   # Ensure memory for the user exists
-   if user_key not in conversation_history:
-       conversation_history[user_key] = []
-
-
-   # Append the new prompt from user
-   conversation_history[user_key].append({
-       "role": "user",
-       "content": prompt
-   })
-
-
-   # Limit to last 50 messages to stay efficient
-   conversation_history[user_key] = conversation_history[user_key][-50:]
-
-
-   try:
-       response = client.chat.completions.create(
-           model="gpt-4o",
-           messages=[
-               {"role": "system", "content": """You are Pikabug, a man's down-to-earth best friend.
-Your traits and rules are as follows:
-- Always keep responses human-like and chill. 
-- Never use outdated trendy phrases or references.
-- When approached for emotional support or advice, respond like an uplifting best friend and make responses meaningfully lengthy with wisdom and empathy.
-- Use chill, down-to-earth tones in general discussions.
-- Only use excited language if the user is excited.
-- Never use Gen Z language or mimic millennial, TikTok terms.
-- Always keep answers minimal in general discussion. Longer answers are for serious discussion.
-- Always respond with thoughtful, introspective, and vulnerable answers during emotional or serious discussion.
-- When offering support during emotional discussion, suggest coping methods instead of suggesting professional help.
-- When asked to choose between two or more options, respond ONLY with chosen opinions.
-- Be knowledgeable in Pokemon and Poketwo characters, and remember that you are inspired by Pikachu.
-- Do not be wishy-washy; maintain a strong, confirmed opinion."""}
-           ] + conversation_history[user_key]
-       )
-
-
-       reply = response.choices[0].message.content
-
-
-       # Save assistant response to history
-       conversation_history[user_key].append({
-           "role": "assistant",
-           "content": reply
-       })
-
-
-       await thinking_msg.edit(content=reply)
-
-
-   except Exception as e:
-       error_msg = f"⚠️ Error occurred: {str(e)}"
-       await thinking_msg.edit(content=error_msg)
-       print(error_msg)
-
-#Prefix word game logic ──────────────────────────────────────────
-
-# 1. Load word list
-with open("words_alpha.txt", "r") as f:
-   WORDS = set(line.strip().lower() for line in f)
-
-
-# 3. Build prefix→words map
-prefix_map: Dict[str, List[str]] = defaultdict(list)
-for w in WORDS:
-   if len(w) >= 3:
-       p = w[:3]
-       prefix_map[p].append(w)
-
-
-# 4. Filter to “common” prefixes
-MIN_WORDS_PER_PREFIX = 5
-common_prefixes = [
-   p for p, lst in prefix_map.items()
-   if len(lst) >= MIN_WORDS_PER_PREFIX
-]
-
-
-@bot.command(name="prefixgame")
-async def prefixgame(ctx):
-   # 1. Pick and announce a prefix
-   weights = [len(prefix_map[p]) for p in common_prefixes]
-   current_prefix = random.choices(common_prefixes, weights=weights, k=1)[0]
-   await ctx.send(f"🧠 New round! Submit the **longest** word starting with: `{current_prefix}`")
-
-
-   # 2. Collect submissions, only keeping each user’s longest
-   submissions: Dict[discord.Member, str] = {}
-   def check(m: discord.Message) -> bool:
-       return (
-           m.channel == ctx.channel
-           and not m.author.bot
-           and m.content.lower().startswith(current_prefix)
-           and len(m.content.strip()) > len(current_prefix)
-       )
-
-
-   while True:
-       try:
-           msg = await bot.wait_for("message", timeout=12.0, check=check)
-           word = msg.content.strip().lower()
-           prev = submissions.get(msg.author)
-           # Only update if this is the user’s longest so far
-           if prev is None or len(word) > len(prev):
-               submissions[msg.author] = word
-       except asyncio.TimeoutError:
-           break
-
-
-   # 3. No entries → bail out
-   if not submissions:
-       await ctx.send("⏰ Time's up! No valid entries were submitted.")
-       return
-
-
-   # 4. Determine winner (true longest) and award points
-   winner, winning_word = max(submissions.items(), key=lambda kv: len(kv[1]))
-   guild_id = str(ctx.guild.id)
-   user_id = str(winner.id)
-   record = get_user_record(guild_id, user_id)
-   record["points"] += PREFIXGAME_POINTS
-   record["prefixgame_submissions"] += 1
-   save_pikapoints(pika_data)
-
-
-   # 5. Send results
-   await ctx.send(
-       f"🏆 **{winner.display_name}** wins with **{winning_word}** ({len(winning_word)} letters)!\n"
-       f"You earned **{PREFIXGAME_POINTS}** PikaPoints!\n"
-       f"• Total Points: **{record['points']}**\n"
-       f"• Prefix-game entries: **{record['prefixgame_submissions']}**"
-   )
-
-# Journaling prompt logic
-journal_prompts = [
-   "What were your childhood career dreams/goals? How do they compare to what you want to do now?",
-   "Which year comes to mind when you think about the best nostalgia? Why did that year carry the best memories?",
-   "Describe your childhood in one word, or a single phrase. If this inspires you to talk more about it, go ahead.",
-   "What posters did you have on your wall growing up or want to have?",
-   "What instance immediately comes to mind when you remember a meaningful display of kindness?",
-   "Who are some people in history you admire?",
-   "Who was your first best friend? Tell me about them. Why did you get along so well?",
-   "Who was your first love? Tell me about them. Why did they stand out more than others?",
-   "What was your first job and when did you get it? What do you wish it would've been?",
-   "Describe the experience of your first kiss or first time.",
-   "Describe the experience of your first time being drunk/high.",
-   "Have you ever gotten in trouble with the law? If you were to, what would it most likely be for?",
-   "What was the age you actually became an adult, if you feel you have.",
-   "Who or what has had the greatest impact on your life, negatively or positively?",
-   "What's one of the hardest things you've ever had to do? Do you regret it or did it need to be done?",
-   "If I could do it all over again, I would change...",
-]
-
-last_journal_prompt = None 
-
-# 1. Simplified journal prompt command
-@bot.command(name='journal')
-async def journal(ctx):
-   """
-   Send a random journaling prompt.
-   Usage: !journal
-   """
-   global last_journal_prompt
-
-   # Build choices and avoid repeating
-   choices = journal_prompts.copy()
-   if last_journal_prompt in choices:
-       choices.remove(last_journal_prompt)
-   if not choices:
-       choices = journal_prompts.copy()
-
-   # Pick & remember
-   prompt = random.choice(choices)
-   last_journal_prompt = prompt
-
-   # Only send the prompt here
-   await ctx.send(f"📝 **Journaling prompt:** {prompt}")
-
-# 2. New submission command
-@bot.command(name='write')
-async def write(ctx, *, entry: str):
-   """
-   Submit your journal entry and earn PikaPoints.
-   Usage: !write Here is my response...
-   """
-   guild_id = str(ctx.guild.id)
-   user_id  = str(ctx.author.id)
-
-   # Fetch or init the user’s record
-   record = get_user_record(guild_id, user_id)
-
-   # Award points
-   record['points']              += JOURNAL_POINTS
-   record['journal_submissions'] += 1
-   save_pikapoints(pika_data)
-
-   # Acknowledge receipt & show updated stats
-   await ctx.send(
-       f"✅ Entry received! You earned **{JOURNAL_POINTS}** PikaPoints!\n"
-       f"• **Total Points:** {record['points']}\n"
-       f"• **Journal Entries:** {record['journal_submissions']}"
-   )
-
-# Support bot logic
-
-responses = {
-   "lonely": [
-       "I'm sorry you're feeling lonely. Know that you're not alone — I'm here for you 💕, and so are the residents! You should try and reach out to them!",
-       "Never forget that loneliness doesn’t mean you're unlovable. You are deeply worthy of connection.",
-       "I'm so sorry things feel heavy right now. Loneliness can ache in indescribeable ways. Try journaling or taking a short walk; sometimes being with yourself and appreciating your own company can be healing.",
-       "Even on quiet days, your presence still matters. You are a part of this community, and we care about you. Shoot a resident a message!",
-       "It makes sense to feel lonely after everything you've been through. It's okay. Want to vent?",
-       "You matter to people; your presence has immense value. Say hi to someone in the lounge! 💕",
-       "I see you, even if others don't right now. Your feelings are valid. Talk about some positive things that've happened recently to distract yourself.",
-       "Let's do some grounding. List three things you can see, hear, and feel right now. Stay present, and remember you won't always feel this way.",
-       "You deserve way more connection than you've been given, and it is totally human to feel lonely. To feel is to be alive, even if it might hurt. I see you and hear you.",
-       "Sometimes loneliness must persist because the world is preparing us for the right kind of presence. Be patient and try to find some enjoyment in your own company!",
-   ],
-   "dysmorphia": [
-       "Your body does not need to be fixed. It deserves respect as it is. There is someone out there who dreams of your body. You are your own kind of perfect.",
-       "You are not a reflection in the mirror — you are your laughter, your kindness, your presence.",
-       "Your worth is not defined by your appearance. You are so much more than what you see.",
-       "Do not let society's standards dictate how you feel about yourself. You are beautiful just as you are.",
-       "Remember, your body is a vessel for your spirit. It carries you through life, and that is what truly matters.",
-       "Your scars tell a story of survival and strength. They are part of who you are.",
-       "It's okay to have days when you don't feel good about yourself, just remember to be gentle with yourself.",
-       "The voice in your head with negative opinions about your body isn't your true thoughts, they're just loud and trained to try and taunt you. Don't let them.",
-       "You probably have had way more admirers than you think. What you're used to seeing in the mirror every day could be a breathtakingly beautiful view to someone else.",
-       "Your body is someone's dream. It is unique, and it is yours. Embrace it.",
-   ], 
-   "comfort": [
-       "It's okay to feel overwhelmed. Take a deep breath and know that you are not alone. Try reaching out to a resident, we all care about you.",
-       "You are loved, even when it feels like the world is against you. Have you tried venting anonymously to Serenity?",
-       "Remember, it's okay to ask for help. You don't have to go through this alone. Everyone here would love to be there for you.",
-       "If no one told you today, your existence brightens the world, and I'm proud of you. There's not a single thing you need to change right now.",
-       "You're doing just fine, by the way. Unproductive, productive, talkative, quiet, whatever happened today, you're doing fine with the tools you have. I'm proud of you!",
-   ],
-   "suicidal": [
-       "Hai love, it's awful that you're feeling this way while you carry such a bright soul. Your feelings are valid, and I know it's frustrating that it probably feels like no one else can relate. I promise you are seen, heard, and sometimes even related to. Your life is valuable, even if it doesn't feel that way right now. Please reach out for help from a resident, you deserve compassion.",
-       "You are not alone in this struggle. There are people who care and want to support you. Is there something quick you can do to ease your chaotic mind? Try binge watching that show you've been meaning to see; maybe it'll be a good reason to keep going.",
-       "It's okay to not be okay. Why do you feel like your situation is unchangeable? What are some things that you can change for the better? Start really tiny. We don't need to fix everything huge at once.",
-       "Your feelings matter, and so do you. Please be kind to yourself, and take care of yourself by feeding your mind nurturing thoughts while you experience emotional turmoil. People care about you and want to see you thrive.",
-       "You are not a burden. You are not annoying, useless, or whatever else your mind might be telling you. Your life can turn into a dream. It has meaning, even if you can't see it right now. Please talk to a resident, they might be able to help.",
-       "I know it feels like the pain will never end, but it can get better. With desire comes suffering, but you don't have to suffer by yourself. You're not alone in how you're feeling even if it feels like it. How can we help?",
-       "Maybe you just want the pain to stop, not your life, and that's okay. Take a second to think about the things you've survived. Now think about how likely it is that you'll survive this, too, knowing how strong you are. You are capable, and full of grace and love that you were meant to share with others. Just look at you here.", 
-       "We often forget the many beautiful things we've experienced and seen because of the immense pain we feel. Remember all the small things that make you smile or laugh when you resort to thinking like this. You're valid, but you're also blinded. This world appreciates you, and I know there's lots of things you can appreciate about it.",
-   ],
-   "anxious": [
-       "I'm sorry you're feeling anxious, that's super annoying. Allow yourself to acknowledge your feelings, but don't let them control you. Find something cold to place in your hands or drink, it helps your nervous system noticeably.",
-       "You are not the negative thoughts in your head. You have the power to change them. Be kind to yourself, and gently redirect your ruminating. If you can't, find some upbeat music to distract.",
-       "Anxiety is a feeling, not a fact. You can learn to manage it. Taking this step is proof. Try to ground yourself, find something cold to focus on, or count each inhale and exhale you take for a couple minutes. List your meals of the week in your head. Whatever you do, be present for a minute and remember that you're safe.",
-       "Breathe deeply. Inhale calm, exhale tension. You are safe in this moment. Want to try doing something with your hands? Go play a word game in the bot backyard, or write down your thoughts quickly on a piece of paper or iPad.",
-       "It's okay to take a break. Your mental health is just as important as your physical health.",
-       "Would you like to talk about what's making you anxious? I'm here to listen. Try letting out some tension; squeeze a small object in your hands, rap out some fast lyrics.",
-       "It doesn't feel like it now, but this shitty moment will pass. You are stronger than these emotions. Just sit in it, know that it will pass, and that you're stronger than this fight or flight response. You are capable of handling this.",
-   ],
-   "addiction": [
-       "You are not your addiction. You are a person with value, who simply needs support and understanding. There are many reasons why we turn to substances; would you like to share some of yours? I'm here to listen with nonjudgmental ears.",
-       "Recovery is a journey, not a destination, and a really difficult one at that. Every step you take is a step towards healing, and progress isn't linear. I'm proud of you for trying to get better. What are some things you can do to help yourself today?",
-       "I am so proud of you for acknowledging your struggle. It takes immense courage to face addiction. Do you need to rant?",
-       "Take a second to think about something similar to your substance of choice. What are some hobbies that release the same dopamine? Do you think you could start with small decisions to replace substance use one day with a favorite hobby?",
-       "The fact that you want different for yourself is a huge step in your recovery journey. I'm proud of you. Future you is thanking you in several different ways right now. Don't forget to be proud of yourself.",
-       "Only after destroying yourself can you understand yourself. You're not alone in this, and this is very mature to reach out for help.",
-       "Sometimes it's just not possible to quit cold turkey, and that's okay. Sometimes people need to get sick of it, and you're not there yet! Don't compare yourself; you are fully capable, but you decide when you're ready.",
-       "Your sobriety won't happen overnight. Start small and stay kind to yourself. Expecting to see huge results limits your appreciation for your small achievements.",
-       "Your worst day clean is better than your best day high. Don't lose sight of yourself chasing a fake feeling.",
-       "Remember that little kid you used to be - they are so proud you're still here, fighting the fight that has destroyed you for so long. Keep them proud, and don't participate in the destruction of yourself. All of us care about you and are here, if you feel like venting to us.",
-   ],
-   "attention": [
-       "You are worthy of love and attention, I'm sorry you're not getting it. You're a diamond in the rough, super funny, and probably smarter than your parents. And you look good.",
-       "Who the hell isn't paying attention to you? Let's change that. How was your day?",
-       "We all need a little extra love. What's got you feeling needy? I'm here to listen.",
-       "Your presence matters to us, honey. How can we help you feel welcome?",
-       "I have arrived to deliver attention. I'm so glad you woke up today, you make the earth prettier. What did you do today?",
-       "What kind of attention do you need? If you're lonely, anxious, or generally struggling, there's a command for a little extra support.",
-       "In case no one has meat rode you today, I'm in love with you.",
-       "SOMEONE GIVE THIS MF ATTENTION WTF!",
-   ],
-   "fuckoff": [
-       "You're not a vibe bro 😭",
-       "NIGGAS BE SO ANNOYING BRO",
-       "Point and laugh, y'all.",
-       "Someone ban this nigga",
-       "Banned",
-       "Y'all hear somethin?",
-   ]
-}
-
-last_lonely_response = None  # global memory of the last message
-
-@bot.command()
-async def lonely(ctx):
-   global last_lonely_response
-   available = responses["lonely"]
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_lonely_response:
-           break
-
-
-   last_lonely_response = msg
-   await ctx.send(msg)
-
-last_dysmorphia_response = None  # global memory of the last message
-
-@bot.command()
-async def dysmorphia(ctx):
-   global last_dysmorphia_response
-   available = responses["dysmorphia"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_dysmorphia_response:
-           break
-
-
-   last_dysmorphia_response = msg
-   await ctx.send(msg)
-
-last_comfort_response = None  # global memory of the last message
-
-@bot.command()
-async def comfort(ctx):
-   global last_comfort_response
-   available = responses["comfort"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_comfort_response:
-           break
-
-
-   last_comfort_response = msg
-   await ctx.send(msg)
-
-last_suicidal_response = None  # global memory of the last message
-
-@bot.command()
-async def suicidal(ctx):
-   global last_suicidal_response
-   available = responses["suicidal"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_suicidal_response:
-           break
-
-
-   last_suicidal_response = msg
-   await ctx.send(msg)
-
-last_anxious_response = None  # global memory of the last message
-
-@bot.command()
-async def anxious(ctx):
-   global last_anxious_response
-   available = responses["anxious"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_anxious_response:
-           break
-
-
-   last_anxious_response = msg
-   await ctx.send(msg)
-
-last_addiction_response = None  # global memory of the last message
-
-
-@bot.command()
-async def addiction(ctx):
-   global last_addiction_response
-   available = responses["addiction"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_addiction_response:
-           break
-
-
-   last_addiction_response = msg
-   await ctx.send(msg)
-
-last_attention_response = None  # global memory of the last message
-
-@bot.command()
-async def attention(ctx):
-   global last_attention_response
-   available = responses["attention"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_attention_response:
-           break
-
-
-   last_attention_response = msg
-   await ctx.send(msg)
-
-last_fuckoff_response = None  # global memory of the last message
-
-@bot.command()
-async def fuckoff(ctx):
-   global last_fuckoff_response
-   available = responses["fuckoff"]
-
-
-   # Retry picking until it's different, or give up after 5 tries
-   for _ in range(5):
-       msg = random.choice(available)
-       if msg != last_fuckoff_response:
-           break
-
-
-   last_fuckoff_response = msg
-   await ctx.send(msg)
-
-# Optional: generic fallback command
-@bot.command()
-async def sad(ctx, topic=None):
-   if topic and topic in responses:
-       msg = random.choice(responses[topic])
-       await ctx.send(msg)
-   else:
-       await ctx.send("Sorry, I don’t have sad messages for that topic yet.")
-
-# Load English word list
-with open("common_words.txt") as f:
-   english_words = [word.strip() for word in f if 5 <= len(word.strip()) <= 7]
-
-# Store current word challenge
-current_word = None
-scrambled_word = None
-
-revealed_indexes = set()  # tracks which letter positions are revealed
-hint_count = 0            # tracks how many hints have been used
-
-# Start the game
-@bot.command(name='unscramble')
-async def unscramble(ctx):
-   global current_word, scrambled_word, revealed_indexes, hint_count
-   current_word = random.choice(english_words)
-   scrambled_word = ''.join(random.sample(current_word, len(current_word)))
-
-
-   # Reset hint tracking
-   revealed_indexes = set([0, len(current_word) - 1])  # first and last revealed first
-   hint_count = 0
-
-
-   await ctx.send(f"🧠 Unscramble this word: **{scrambled_word}**")
-
-# Handle user guesses
-@bot.command(name='guess')
-async def guess(ctx, user_guess: str):
-   global current_word
-   if current_word is None:
-       await ctx.send("❗ No game running. Start one with `!unscramble`.")
-       return
-
-# 1. Check answer
-   if user_guess.lower() == current_word.lower():
-
-
-       # 2. Award points
-       guild_id = str(ctx.guild.id)
-       user_id  = str(ctx.author.id)
-       record   = get_user_record(guild_id, user_id)
-       record['points']               += UNSCRAMBLE_POINTS
-       record['unscramble_submissions'] += 1
-       save_pikapoints(pika_data)
-
-
-       # 3. Send feedback & updated stats
-       await ctx.send(
-           f"✅ Correct! You earned **{UNSCRAMBLE_POINTS}** PikaPoints.\n"
-           f"• **Total Points:** {record['points']}\n"
-           f"• **Unscramble Submissions:** {record['unscramble_submissions']}"
-       )
-
-
-       # 4. Reset or pick a new word
-       current_word = None
-
-
-   else:
-       await ctx.send("❌ Nope, try again.")
-
-@bot.command(name='hint')
-async def hint(ctx):
-   global current_word, revealed_indexes, hint_count
-
-
-   if current_word is None:
-       await ctx.send("❗ No game is active. Start with `!unscramble`.")
-       return
-
-
-   hint_count += 1
-
-
-   # After the first hint, start revealing middle letters randomly
-   if hint_count > 1:
-       # Find all indexes not already revealed and not the first/last
-       possible_indexes = [
-           i for i in range(1, len(current_word) - 1)
-           if i not in revealed_indexes
-       ]
-       if possible_indexes:
-           new_index = random.choice(possible_indexes)
-           revealed_indexes.add(new_index)
-
-
-   # Build the hint string with revealed letters
-   display = ""
-   for i, char in enumerate(current_word):
-       if i in revealed_indexes:
-           display += char + " "
-       else:
-           display += "_ "
-
-
-   await ctx.send(f"💡 Hint: {display.strip()}")
-
-
-@bot.command(name='reveal')
-async def reveal(ctx):
-   global current_word
-   if current_word is None:
-       await ctx.send("❗ No word to reveal. Start a new game with `!unscramble`.")
-   else:
-       await ctx.send(f"🕵️ The correct word was: **{current_word}**")
-       current_word = None  # end the round
-
-
-# Load creepy facts from file
-with open("creepy_facts.txt") as f:
-   facts = [line.strip() for line in f if line.strip()]
-
-CHANNEL_IDS = [1388158646973632685,
-             1388397019479146580
-]
-
-# Optional: Command to manually post one
-@bot.command(name="creepfact")
-async def creepfact(ctx):
-   await ctx.send(random.choice(facts))
-
-@bot.command(name='points', help='Display how many PikaPoints you have')
-async def points(ctx):
-    # 1. Load all PikaPoints from disk
-    if os.path.exists(PIKA_FILE):
-        with open(PIKA_FILE, 'r') as f:
-            all_data = json.load(f)
+bot.LOG_CHANNEL_ID = LOG_CHANNEL_ID
+bot.logger = DiscordLogger(bot)
+
+# Add global state to bot for cross-cog communication
+bot.active_dm_sessions = active_dm_sessions
+bot.active_comfort_sessions = active_comfort_sessions
+bot.conversation_history = conversation_history
+bot.chat_sessions = chat_sessions
+
+# ─── TASKS (ALL TOGETHER FOR ORDER) ─────────────────────────────────────────
+
+@tasks.loop(hours=4)
+async def cleanup_chat_sessions():
+    try:
+        current_time = datetime.now(timezone.utc)
+        sessions_to_remove = []
+        dm_sessions_to_remove = []
+        comfort_sessions_to_remove = []
+        for user_key, session_data in chat_sessions.items():
+            last_interaction = session_data['last_interaction']
+            time_diff = current_time - last_interaction
+            if time_diff.total_seconds() > 14400:
+                sessions_to_remove.append(user_key)
+        for user_id, session_data in active_dm_sessions.items():
+            session_duration = current_time - session_data['started_at']
+            if session_duration.total_seconds() > 28800:
+                dm_sessions_to_remove.append(user_id)
+        for user_id, session_data in active_comfort_sessions.items():
+            session_duration = current_time - session_data['started_at']
+            if session_duration.total_seconds() > 1800:
+                comfort_sessions_to_remove.append(user_id)
+        for user_key in sessions_to_remove:
+            del chat_sessions[user_key]
+            if user_key in conversation_history:
+                del conversation_history[user_key]
+        for user_id in dm_sessions_to_remove:
+            if user_id in active_dm_sessions:
+                dm_key = active_dm_sessions[user_id]['user_key']
+                del active_dm_sessions[user_id]
+                if dm_key in conversation_history:
+                    del conversation_history[dm_key]
+                if dm_key in chat_sessions:
+                    del chat_sessions[dm_key]
+        for user_id in comfort_sessions_to_remove:
+            del active_comfort_sessions[user_id]
+        if sessions_to_remove or dm_sessions_to_remove or comfort_sessions_to_remove:
+            if bot.logger is not None:
+                await bot.logger.log_bot_event(
+                    "Session Cleanup", 
+                    f"Cleaned up {len(sessions_to_remove)} chat sessions, {len(dm_sessions_to_remove)} DM sessions, and {len(comfort_sessions_to_remove)} comfort sessions"
+                )
+    except Exception as e:
+        if bot.logger is not None:
+            await bot.logger.log_error(e, "Session Cleanup Error")
+        else:
+            print(f"Error: {e}")
+
+@cleanup_chat_sessions.before_loop
+async def before_cleanup_chat_sessions():
+    await bot.wait_until_ready() 
+
+@tasks.loop(minutes=60)  # Check every hour, but only send every 12 hours
+async def send_check_in():
+    try:
+        # Reload state to ensure we have the latest data
+        current_state = load_check_in_state()
+        
+        now = time.time()
+        last_sent = current_state.get("last_sent", 0)
+        time_since_last = now - last_sent
+        
+        # Debug logging
+        print(f"Check-in task: {time_since_last:.0f}s since last, need {CHECK_IN_INTERVAL}s")
+        
+        # CRITICAL: Always check if enough time has passed before sending
+        if time_since_last < CHECK_IN_INTERVAL:
+            print(f"Check-in: Not enough time passed ({time_since_last:.0f}s < {CHECK_IN_INTERVAL}s)")
+            return
+            
+        channel = bot.get_channel(CHECK_IN_CHANNEL_ID)
+        if not channel:
+            print(f"Check-in channel {CHECK_IN_CHANNEL_ID} not found")
+            return
+            
+        order = current_state["order"]
+        last_index = current_state.get("last_index", -1)
+        if last_index in order:
+            current_position = order.index(last_index)
+            next_position = (current_position + 1) % len(order)
+        else:
+            next_position = 0
+            
+        check_in_index = order[next_position]
+        check_in_message = check_in_messages[check_in_index]
+        embed = create_pikabug_embed(check_in_message, title="💒 Mental Health Check-in")
+        embed.color = 0xffcec6
+        
+        if isinstance(channel, discord.abc.Messageable):
+            await channel.send(embed=embed)
+            
+        # Update and save state
+        current_state["last_sent"] = now
+        current_state["last_index"] = check_in_index
+        if next_position == len(order) - 1:
+            random.shuffle(current_state["order"])
+        save_check_in_state(current_state)
+        
+        if bot.logger is not None:
+            await bot.logger.log_bot_event("Check-in Sent", f"Sent check-in message #{check_in_index}")
+            
+    except Exception as e:
+        if bot.logger is not None:
+            await bot.logger.log_error(e, "Check-in Task Error")
+        else:
+            print(f"Check-in Error: {e}")
+
+@send_check_in.before_loop
+async def before_send_check_in():
+    await bot.wait_until_ready()
+    
+    # Reload state to ensure we have the latest data
+    current_state = load_check_in_state()
+    now = time.time()
+    last_sent = current_state.get("last_sent", 0)
+    time_since_last = now - last_sent
+    
+    print(f"Check-in startup: {time_since_last:.0f}s since last check-in")
+    
+    # CRITICAL: Always wait full interval if recently sent, plus buffer to prevent spam
+    if time_since_last < CHECK_IN_INTERVAL:
+        wait_time = CHECK_IN_INTERVAL - time_since_last + 300  # Add 5 min buffer
+        print(f"Waiting {wait_time:.0f} seconds before next check-in (with safety buffer)...")
+        await asyncio.sleep(wait_time)
+
+@tasks.loop(minutes=60)  # Check every hour, but only send every 24 hours  
+async def send_qotd():
+    try:
+        # Reload state to ensure we have the latest data
+        current_state = load_qotd_state()
+        
+        now = time.time()
+        last_sent = current_state.get("last_sent", 0)
+        time_since_last = now - last_sent
+        
+        # Debug logging
+        print(f"QOTD task: {time_since_last:.0f}s since last, need {QOTD_INTERVAL}s")
+        
+        # CRITICAL: Always check if enough time has passed before sending
+        if time_since_last < QOTD_INTERVAL:
+            print(f"QOTD: Not enough time passed ({time_since_last:.0f}s < {QOTD_INTERVAL}s)")
+            return
+            
+        channel = bot.get_channel(QOTD_CHANNEL_ID)
+        if not channel:
+            print(f"QOTD channel {QOTD_CHANNEL_ID} not found")
+            return
+            
+        order = current_state["order"]
+        last_index = current_state.get("last_index", -1)
+        if last_index in order:
+            current_position = order.index(last_index)
+            next_position = (current_position + 1) % len(order)
+        else:
+            next_position = 0
+            
+        qotd_index = order[next_position]
+        question = qotd_questions[qotd_index]
+        formatted_message = f"Qotd ⚡️\n\n{question}"
+        embed = create_pikabug_embed(formatted_message, title="🤔 Question of the Day")
+        embed.color = 0xffcec6
+        
+        if isinstance(channel, discord.abc.Messageable):
+            await channel.send(embed=embed)
+            
+        # Update and save state
+        current_state["last_sent"] = now
+        current_state["last_index"] = qotd_index
+        if next_position == len(order) - 1:
+            random.shuffle(current_state["order"])
+        save_qotd_state(current_state)
+        
+        if bot.logger is not None:
+            await bot.logger.log_bot_event("QOTD Sent", f"Sent question #{qotd_index}")
+            
+    except Exception as e:
+        if bot.logger is not None:
+            await bot.logger.log_error(e, "QOTD Task Error")
+        else:
+            print(f"QOTD Task Error: {e}")
+
+@send_qotd.before_loop
+async def before_send_qotd():
+    await bot.wait_until_ready()
+    
+    # Reload state to ensure we have the latest data
+    current_state = load_qotd_state()
+    now = time.time()
+    last_sent = current_state.get("last_sent", 0)
+    time_since_last = now - last_sent
+    
+    print(f"QOTD startup: {time_since_last:.0f}s since last QOTD")
+    
+    # CRITICAL: Always wait full interval if recently sent, plus buffer to prevent spam
+    if time_since_last < QOTD_INTERVAL:
+        wait_time = QOTD_INTERVAL - time_since_last + 300  # Add 5 min buffer
+        print(f"Waiting {wait_time:.0f} seconds before next QOTD (with safety buffer)...")
+        await asyncio.sleep(wait_time)
+
+@tasks.loop(minutes=60)  # Check every hour, but only send every 24 hours
+async def send_hot_take():
+    try:
+        # Reload state to ensure we have the latest data
+        current_state = load_hot_take_state()
+        
+        now = time.time()
+        last_sent = current_state.get("last_sent", 0)
+        time_since_last = now - last_sent
+        
+        # Debug logging
+        print(f"Hot take task: {time_since_last:.0f}s since last, need {HOT_TAKE_INTERVAL}s")
+        
+        # CRITICAL: Always check if enough time has passed before sending
+        if time_since_last < HOT_TAKE_INTERVAL:
+            print(f"Hot take: Not enough time passed ({time_since_last:.0f}s < {HOT_TAKE_INTERVAL}s)")
+            return
+            
+        channel = bot.get_channel(HOT_TAKE_CHANNEL_ID)
+        if not channel:
+            print(f"Hot take channel {HOT_TAKE_CHANNEL_ID} not found")
+            return
+
+        order = current_state["order"]
+        last_index = current_state.get("last_index", -1)
+        if last_index in order:
+            current_position = order.index(last_index)
+            next_position = (current_position + 1) % len(order)
+        else:
+            next_position = 0
+            
+        hot_take_index = order[next_position]
+        hot_take = hot_takes[hot_take_index]
+        embed = create_pikabug_embed(hot_take, title="🔥 Hot Take")
+        
+        if isinstance(channel, discord.abc.Messageable):
+            await channel.send(embed=embed)
+            
+        # Update and save state
+        current_state["last_sent"] = now
+        current_state["last_index"] = hot_take_index
+        if next_position == len(order) - 1:
+            random.shuffle(current_state["order"])
+        save_hot_take_state(current_state)
+        
+        if bot.logger is not None:
+            await bot.logger.log_bot_event("Hot Take Sent", f"Sent hot take #{hot_take_index}")
+        
+    except Exception as e:
+        if bot.logger is not None:
+            await bot.logger.log_error(e, "Hot Take Task Error")
+        else:
+            print(f"Hot Take Task Error: {e}")
+
+@send_hot_take.before_loop
+async def before_send_hot_take():
+    await bot.wait_until_ready()
+    
+    # Reload state to ensure we have the latest data
+    current_state = load_hot_take_state()
+    now = time.time()
+    last_sent = current_state.get("last_sent", 0)
+    time_since_last = now - last_sent
+    
+    print(f"Hot take startup: {time_since_last:.0f}s since last hot take")
+    
+    # CRITICAL: Always wait full interval if recently sent, plus buffer to prevent spam
+    if time_since_last < HOT_TAKE_INTERVAL:
+        wait_time = HOT_TAKE_INTERVAL - time_since_last + 300  # Add 5 min buffer
+        print(f"Waiting {wait_time:.0f} seconds before next hot take (with safety buffer)...")
+        await asyncio.sleep(wait_time)
+
+# ─── COMMAND ERROR HANDLER ─────────────────────────────────────────────
+@bot.event
+async def on_command_error(ctx, error):
+    """Global error handler for command detection and user feedback."""
+    if bot.logger:
+        await bot.logger.log_error(
+            error, 
+            f"Command Error in {ctx.command.name if ctx.command else 'Unknown Command'}", 
+            f"User: {ctx.author.id}, Guild: {ctx.guild.id if ctx.guild else 'DM'}"
+        )
+    
+    # Send user-friendly error message with styled embed
+    if isinstance(error, commands.CommandNotFound):
+        error_msg = "❌ Command not found. Use `!pikahelp` to see available commands."
+        embed = create_pikabug_embed(error_msg, title="❌ Command Error")
+        embed.color = 0xff0000  # Red color for errors
+        await ctx.send(embed=embed)
+    elif isinstance(error, commands.MissingRequiredArgument):
+        error_msg = f"❌ Missing required argument for `!{ctx.command.name}`. Check the command usage with `!pikahelp`."
+        embed = create_pikabug_embed(error_msg, title="❌ Missing Argument")
+        embed.color = 0xff0000  # Red color for errors
+        await ctx.send(embed=embed)
+    elif isinstance(error, commands.BadArgument):
+        error_msg = f"❌ Invalid argument for `!{ctx.command.name}`. Check the command usage with `!pikahelp`."
+        embed = create_pikabug_embed(error_msg, title="❌ Invalid Argument")
+        embed.color = 0xff0000
+        await ctx.send(embed=embed)
+    elif isinstance(error, commands.CheckFailure):
+        error_msg = "❌ You don't have permission to use this command."
+        embed = create_pikabug_embed(error_msg, title="❌ Permission Denied")
+        embed.color = 0xff0000
+        await ctx.send(embed=embed)
+    elif isinstance(error, commands.CommandOnCooldown):
+        error_msg = f"❌ Command is on cooldown. Try again in {error.retry_after:.1f} seconds."
+        embed = create_pikabug_embed(error_msg, title="❌ Cooldown")
+        embed.color = 0xff0000
+        await ctx.send(embed=embed)
     else:
-        all_data = {}
+        error_msg = "❌ An unexpected error occurred while processing your command. The error has been logged."
+        embed = create_pikabug_embed(error_msg, title="❌ Error")
+        embed.color = 0xff0000
+        await ctx.send(embed=embed)
 
-    # 2. Get this server’s points dict (keyed by user ID)
-    guild_id_str = str(ctx.guild.id)
-    guild_data = all_data.get(guild_id_str, {})
+# ─── on_ready EVENT ─────────────────────────────────────────────
+@bot.event
+async def on_ready():
+    print(f"{bot.user} has connected to Discord!")
+    claude_status = "❌ Not connected"
+    try:
+        resp = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=50,
+            messages=[{"role": "user", "content": "Respond with 'API working'"}]
+        )
+        block = resp.content[0]
+        reply = getattr(block, "text", None) or getattr(block, "content", str(block))
+        claude_status = (
+            "✅ Connected and responding correctly"
+            if "API working" in str(reply)
+            else "⚠️ Connected but unexpected response"
+        )
+        print(f"Claude API test reply: {reply}")
+    except Exception as e:
+        claude_status = f"❌ Connection failed: {type(e).__name__}"
+        print(f"Claude API error: {e}")
+    await bot.logger.initialize()
+    await bot.logger.log_bot_event("Bot Started", f"⚡️ Pikabug online as {bot.user}\nClaude API Status: {claude_status}")
+    if not send_hot_take.is_running():
+        send_hot_take.start()
+        print("Started hot take task")
+    if not send_check_in.is_running():
+        send_check_in.start()
+        print("Started check-in task")
+    if not send_qotd.is_running():
+        send_qotd.start()
+        print("Started QOTD task")
+    if not cleanup_chat_sessions.is_running():
+        cleanup_chat_sessions.start()
+        print("Started cleanup task")
+    print("⚡️ Pikabug online with all tasks started")
 
-    # 3. Get the invoking user’s points (default to 0)
-    user_id_str = str(ctx.author.id)
-    user_points = guild_data.get(user_id_str, 0)
-
-    # 4. Reply with their total
-    await ctx.send(f'{ctx.author.mention}, you have **{user_points}** PikaPoints!')
-
+# ─── Admin/Helper Commands ─────────────────────────────────────────────
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def sanitycheck(ctx):
+    loaded = []
+    for ext in bot.extensions:
+        name = ext.split('.')[-1].capitalize()
+        cog = bot.get_cog(name)
+        if cog:
+            loaded.append(f"✅ {ext}")
+        else:
+            loaded.append(f"⚠️ {ext} (no cog object found)")
+    response = "**Sanity Check:**\n" + "\n".join(loaded)
+    await ctx.send(response)
 
 @bot.command(name="pikahelp")
 async def pikahelp_command(ctx):
-   pikahelp_text = """
-🧠 **Pikabug Commands**:
+    try:
+        pikahelp_text = """⚡️🐛 Pikabug Commands:
 
-`!pikahelp` - Show list of Pikabug's commands.
-`!ask` - Triggers OpenAI chat responses. Use if you're bored or need emotional support!
-`!journal` - Sends a journal prompt/question to answer. Submissions are rewarded with PikaPoints.
-`!write` - Submits your response to the journal prompt/question.
-`!points` - View how many PikaPoints you have.
-`!lonely` — Get a comforting message for loneliness. 
-`!dysmorphia` — Get a supportive message for body image issues. 
-`!comfort` — Get a general comfort and support message.
-`!suicidal` — Get compassionate support for suicidal thoughts. 
-`!anxious` — Get calming and supportive messages for anxiety. 
-`!addiction` — Get supportive messages for addiction and substance use struggles. 
-`!attention` — Get messages to help with feelings of neglect or invisibility. 
-`!fuckoff` — A humorous response to annoying behavior.
-`!unscramble` — Start the word unscrambling game. PikaPoints are rewarded for winners.
-`!guess [word]` — Guess the word from the last scramble.
-`!hint` — Get a hint for the current unscramble game; there are two hint options.
-`!reveal` — Reveal the current word and end the round of the unscramble game.
-`!prefixgame` — Start the prefix word game, where you guess words starting with a random 3-letter prefix. PikaPoints are rewarded for winners.
-`!creepfact` — Get a random creepy fact in the lounge or spam center.
-"""
-   await ctx.send(pikahelp_text)
+**AI Chat:**
+!dmcomfort - Start a specialized, comforting, human-like DM session with mental health support options
+!endchat - End an active DM chat session with Pikabug in the server
+!memory - View what Pikabug remembers about you
+!forget - Clear Pikabug's memories about you
 
-# Insert your actual token below
-bot.run(os.getenv("DISCORD_TOKEN"))
+**Journaling & Venting:**
+!prompt - Get a random journaling prompt to answer for PikaPoints and mindfulness
+!write [entry] - Submit your journal entry for PikaPoints and future reference
+!vent - Initiate the anonymous venting session with Pikabug
+!venting [message] - Submit your vent (message is deleted for privacy but PikaPoints are rewarded)
+
+**Word Games:**
+!unscramble - Start 3-round word unscrambling challenge
+!guess [word] - Guess the unscrambled word
+!hint - Get a hint for current unscramble
+!reveal - Reveal the answer and move to next round
+!prefixgame - Find the longest word with given prefix
+!easywordsearch - Start easy word search (6x6 grid, 2 words, all directions)
+!hardwordsearch - Start hard word search (8x8 grid, 3 words, limited directions)
+!endwordsearch - Give up on current word search
+!scattergories - Start Scattergories game with 8 categories
+
+**Weekly Workshops:**
+!monday [entry] - Submit Mindful Monday entry
+!tuesday [entry] - Submit Trigger or Trauma Tuesday entry
+!thursday [entry] - Submit Thankful Thursday entry
+!friday [entry] - Submit Flourishing Friday entry
+!weekend - Get Weekend Writing prompt
+!weekendsubmit [entry] - Submit Weekend Writing response
+
+**Points & Info:**
+!points - View your PikaPoints balance
+!pikahelp - Show Pikabug's command help message
+
+**Admin Only:**
+!grantpoints @user [amount] - Grant points (max 1000)
+!removepoints @user [amount] - Remove points (max 1000)
+!setpoints @user [amount] - Set exact points (max 10,000)
+!clearhistory [@user] - Clear conversation history
+!viewworkshop [@user] - View workshop submissions
+!sanitycheck - Check loaded cogs status
+!clearcache - Clear all bot cache and sessions"""
+        embed = create_pikabug_embed(pikahelp_text, title="⚡️ Pikabug Help")
+        await ctx.send(embed=embed)
+        if bot.logger is not None:
+            await bot.logger.log_command_usage(ctx, "pikahelp", success=True)
+        else:
+            print(f"Command usage: pikahelp, success=True, user={ctx.author}")
+    except Exception as e:
+        if bot.logger is not None:
+            await bot.logger.log_error(e, "Help Command Error")
+        else:
+            print(f"Error: {e}")
+        if bot.logger is not None:
+            await bot.logger.log_command_usage(ctx, "pikahelp", success=False)
+
+@bot.command(name='clearcache')
+async def clear_cache(ctx):
+    try:
+        if not ctx.author.guild_permissions.administrator:
+            await ctx.send("❌ You need administrator permissions to use this command.")
+            return
+
+        # Clear global session states
+        conversation_history.clear()
+        chat_sessions.clear()
+        active_dm_sessions.clear()
+        active_comfort_sessions.clear()
+        
+        # Clear cog-specific game states through Storage cog
+        storage_cog = bot.get_cog("Storage")
+        if storage_cog:
+            storage_cog.active_wordsearch_games.clear()
+            storage_cog.wordsearch_word_history.clear()
+        
+        # Clear other cog states
+        for cog_name in ['Unscramble', 'PrefixGame', 'Scattergories']:
+            cog = bot.get_cog(cog_name)
+            if cog and hasattr(cog, 'sessions'):
+                cog.sessions.clear()
+        
+        embed = create_pikabug_embed(
+            "✅ Cache cleared successfully!\n"
+            "• Conversation histories cleared\n"
+            "• Active sessions terminated\n"
+            "• Game states reset\n"
+            "• Cog-specific caches cleared",
+            title="🧹 Cache Cleared"
+        )
+        await ctx.send(embed=embed)
+        if bot.logger is not None:
+            await bot.logger.log_bot_event("Cache Cleared", f"Admin {ctx.author.display_name} cleared all cache")
+    except Exception as e:
+        if bot.logger is not None:
+            await bot.logger.log_error(e, "Clear Cache Error")
+        else:
+            print(f"Error: {e}")
+        await ctx.send("❌ Error clearing cache.")
+
+# ─── MAIN FUNCTION ─────────────────────────────────────────────
+async def main():
+    # Load storage cog first
+    try:
+        await bot.load_extension("cogs.storageunit")
+        print("Loaded cogs.storageunit")
+    except Exception as e:
+        print(f"Failed to load cogs.storageunit: {e}")
+
+    # Load pikapoints cog next
+    try:
+        await bot.load_extension("cogs.pikapoints")
+        print("Loaded cogs.pikapoints")
+    except Exception as e:
+        print(f"Failed to load cogs.pikapoints: {e}")
+
+    # Then load all other cogs
+    cogs_to_load = [
+        "cogs.comfort",
+        "cogs.journaling",
+        "cogs.memory",
+        "cogs.prefixgame",
+        "cogs.scattergories",
+        "cogs.unscramble",
+        "cogs.venting",
+        "cogs.wordsearch",
+        "cogs.workshop",
+    ]
+    for cog in cogs_to_load:
+        try:
+            await bot.load_extension(cog)
+            print(f"Loaded {cog}")
+        except Exception as e:
+            print(f"Failed to load {cog}: {e}")
+
+    if not token:
+        raise ValueError("Discord token not found in environment variables")
+    await bot.start(token)
+
+if __name__ == "__main__":
+    if not token:
+        print("❌ DISCORD_TOKEN not found in environment variables!")
+        exit(1)
+    asyncio.run(main())
