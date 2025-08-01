@@ -10,7 +10,7 @@ from typing import Dict, Set, Optional
 
 # ★ Consistent color (matches nyxcore.py and memory.py)
 NYX_COLOR = 0x76b887
-STORAGE_PATH = "./nyxnotes"
+STORAGE_PATH = os.getenv("STORAGE_PATH", "./nyxnotes")
 os.makedirs(STORAGE_PATH, exist_ok=True)
 
 # ★ File configuration - separate files for different purposes
@@ -103,7 +103,7 @@ class PrefixGame(commands.Cog):
                     words.add(word)
                     
             self.prefix_words_cache = words
-            self.logger.info(f"Loaded {len(words)} prefix words from {PREFIXES_FILE}")
+            self.logger.debug(f"Loaded {len(words)} prefix words from {PREFIXES_FILE}")
             return words
             
         except Exception as e:
@@ -144,7 +144,7 @@ class PrefixGame(commands.Cog):
                     words.add(word)
                     
             self.validation_words_cache = words
-            self.logger.info(f"Loaded {len(words)} validation words from {VALIDATION_FILE}")
+            self.logger.debug(f"Loaded {len(words)} validation words from {VALIDATION_FILE}")
             return words
             
         except Exception as e:
@@ -209,17 +209,20 @@ class PrefixGame(commands.Cog):
             
         return True
 
-    def calculate_points(self, word: str) -> int:
+    def calculate_points(self, word: str, is_longest: bool = False) -> int:
         """
-        Calculate NyxNotes points for a word based on length.
+        Calculate NyxNotes points for a word based on length and longest status.
         
         Args:
             word: The submitted word
+            is_longest: Whether this is the longest word in the game
             
         Returns:
-            Points to award (5 or 10)
+            Points to award
         """
-        return 10 if len(word) >= 8 else 5
+        base_points = 10 if len(word) >= 8 else 5
+        longest_bonus = 10 if is_longest else 0
+        return base_points + longest_bonus
 
     async def start_prefix_game(self, ctx: commands.Context):
         """
@@ -241,7 +244,7 @@ class PrefixGame(commands.Cog):
                     description=f"Failed to load word lists: {str(e)}",
                     color=discord.Color.red()
                 )
-                await ctx.send(embed=embed)
+                await self.bot.safe_send(ctx.channel, embed=embed)
                 return
 
             if len(prefixes) < 3:
@@ -250,58 +253,40 @@ class PrefixGame(commands.Cog):
                     description="Not enough prefixes available for the game.",
                     color=discord.Color.red()
                 )
-                await ctx.send(embed=embed)
+                await self.bot.safe_send(ctx.channel, embed=embed)
                 return
 
-            # ★ Game announcement
+            # ★ Choose random prefix
+            prefix = random.choice(prefixes)
+            
+            # ★ Combined game announcement and round start
             game_embed = discord.Embed(
                 title="🎮 Prefix Word Game Started!",
                 description=(
                     "**How to play:**\n"
                     "• I'll give you a 3-letter prefix\n"
-                    "• Submit the longest valid English word starting with that prefix\n"
-                    "• Words 8+ letters = **10 🪙**\n"
-                    "• Words 3-7 letters = **5 🪙**\n"
-                    "• Game ends when someone submits the longest word!"
+                    "• Submit valid English words starting with that prefix\n"
+                    "• **ALL valid words get points:**\n"
+                    "  - Words 3-7 letters = **5 🪙**\n"
+                    "  - Words 8+ letters = **10 🪙**\n"
+                    "  - **Longest word gets +10 🪙 bonus!**\n"
+                    "• Game ends after 20 seconds!\n\n"
+                    f"**Prefix:** `{prefix.upper()}`"
                 ),
                 color=self.nyx_color
             )
-            game_embed.set_footer(text="Get ready! Starting in 3 seconds...")
-            await ctx.send(embed=game_embed)
-            
-            await asyncio.sleep(3)
+            game_embed.set_footer(text="You have 20 seconds to submit as many words as possible!")
+            result = await self.bot.safe_send(ctx.channel, embed=game_embed)
+            if not result:
+                await self.bot.safe_send(ctx.channel, f"🎮 Prefix Word Game started! Submit words starting with: {prefix.upper()}\nYou have 20 seconds!")
 
-            # ★ Choose random prefix
-            prefix = random.choice(prefixes)
-            
-            # ★ Announce the round
-            round_embed = discord.Embed(
-                title="🔤 Find the Longest Word!",
-                description=f"**Prefix:** `{prefix.upper()}`\n\nSubmit the **longest valid English word** that starts with this prefix!",
-                color=self.nyx_color
-            )
-            round_embed.add_field(
-                name="Scoring",
-                value="8+ letters = **10 🪙**\n3-7 letters = **5 🪙**",
-                inline=True
-            )
-            round_embed.add_field(
-                name="Game End",
-                value="Game ends when the longest word is found!",
-                inline=True
-            )
-            round_embed.set_footer(text="You have 20 seconds to submit your words!")
-            await ctx.send(embed=round_embed)
-
-            # ★ Collect responses
-            user_words: Dict[int, str] = {}
+            # ★ Collect responses - FIXED SCORING SYSTEM
+            user_words: Dict[int, Set[str]] = {}  # Changed to set to avoid duplicates per user
             longest_word = ""
             longest_user_id = None
-            total_points_awarded = 0  # Track total points given out during game
             
             def check(msg):
                 # Only messages in same channel, from real users, not bots
-                # Allow multiple submissions per user (they can improve their word)
                 if (msg.channel != ctx.channel or 
                     msg.author.bot):
                     return False
@@ -311,6 +296,7 @@ class PrefixGame(commands.Cog):
 
             # ★ Game loop - collect words for exactly 20 seconds
             timeout_duration = 20  # 20 seconds to submit words
+            reaction_cooldown = {}  # Track reaction cooldowns per user
             
             try:
                 # Wait for the full 20 seconds, collecting all valid submissions
@@ -327,34 +313,28 @@ class PrefixGame(commands.Cog):
                         word = msg.content.strip().lower()
                         user_id = msg.author.id
                         
-                        # Store the word for this user (overwrites previous if they submit multiple)
-                        user_words[user_id] = word
+                        # Initialize user's word set if not exists
+                        if user_id not in user_words:
+                            user_words[user_id] = set()
+                        
+                        # Add word to user's set (automatically handles duplicates)
+                        user_words[user_id].add(word)
                         
                         # Update longest word tracking
                         if len(word) > len(longest_word):
                             longest_word = word
                             longest_user_id = user_id
-                            
-                            # React to show word was accepted as new longest
-                            try:
+                        
+                        # CHECKMARK ALL VALID WORDS with cooldown per user
+                        try:
+                            current_time = asyncio.get_event_loop().time()
+                            if (user_id not in reaction_cooldown or 
+                                current_time - reaction_cooldown[user_id] > 1.0):  # 1 second cooldown per user
                                 await msg.add_reaction("✅")
-                            except:
-                                pass
-                        else:
-                            # React to show word was valid but not longest
-                            try:
-                                await msg.add_reaction("👍")
-                            except:
-                                pass
-                            
-                            # Award 5 NyxNotes for valid non-longest words
-                            memory_cog = self.bot.get_cog("Memory")
-                            if memory_cog:
-                                try:
-                                    await memory_cog.add_nyx_notes(user_id, 5)
-                                    total_points_awarded += 5
-                                except Exception as e:
-                                    self.logger.warning(f"Failed to award NyxNotes to {user_id}: {e}")
+                                reaction_cooldown[user_id] = current_time
+                        except discord.HTTPException:
+                            # Skip reactions if rate limited
+                            pass
                                 
                     except asyncio.TimeoutError:
                         # Time ran out, exit the loop
@@ -364,54 +344,71 @@ class PrefixGame(commands.Cog):
                 # Handle any errors during word collection
                 self.logger.error(f"Error during word collection: {e}")
                     
-            # ★ Game ended - announce results
-            if not longest_word:
+            # ★ Game ended - process results
+            if not user_words or not longest_word:
                 embed = discord.Embed(
                     title="Game Ended",
                     description="No valid words were submitted. Better luck next time!",
                     color=self.nyx_color
                 )
-                await ctx.send(embed=embed)
+                await self.bot.safe_send(ctx.channel, embed=embed)
                 return
 
-            # ★ Get winner and calculate points
+            # ★ CALCULATE AND AWARD POINTS - BATCH PROCESSING TO AVOID RATE LIMITS
+            memory_cog = self.bot.get_cog("Memory")
+            total_points_awarded = 0
+            user_scores = {}  # Track each user's total points
+            
+            if memory_cog:
+                try:
+                    # Process each user's words in batches to avoid rate limiting
+                    for user_id, words in user_words.items():
+                        user_total = 0
+                        
+                        # Calculate total points for this user first
+                        for word in words:
+                            is_longest = (word == longest_word and user_id == longest_user_id)
+                            points = self.calculate_points(word, is_longest)
+                            user_total += points
+                        
+                        # Award all points to user in ONE API call instead of per-word
+                        if user_total > 0:
+                            await memory_cog.add_nyx_notes(user_id, user_total)
+                            total_points_awarded += user_total
+                            
+                            # INCREASED delay between users to prevent rate limiting
+                            await asyncio.sleep(0.5)  # Reduced to 0.5 seconds between users
+                        
+                        user_scores[user_id] = user_total
+                        
+                except Exception as e:
+                    self.logger.error(f"Error awarding points: {e}")
+
+            # ★ Get winner name - Use display name from guild member
             winner_name = "Unknown User"
             try:
-                # Try to get member from guild first
-                winner = ctx.guild.get_member(longest_user_id)
-                if winner:
-                    winner_name = winner.display_name
-                else:
-                    # Try fetching from Discord API
-                    try:
-                        winner = await ctx.guild.fetch_member(longest_user_id)
+                # Try to get member from guild first for display name
+                if ctx.guild:
+                    winner = ctx.guild.get_member(longest_user_id)
+                    if winner:
                         winner_name = winner.display_name
-                    except discord.NotFound:
-                        # User not in guild, try to get user object
-                        try:
-                            user = await self.bot.fetch_user(longest_user_id)
-                            winner_name = user.display_name or user.name
-                        except:
+                    else:
+                        # Fallback to cached user lookup
+                        winner = self.bot.get_user(longest_user_id)
+                        if winner:
+                            winner_name = winner.global_name or winner.name
+                        else:
                             winner_name = "Unknown User"
-                    except:
+                else:
+                    # No guild context, use cached user lookup
+                    winner = self.bot.get_user(longest_user_id)
+                    if winner:
+                        winner_name = winner.global_name or winner.name
+                    else:
                         winner_name = "Unknown User"
             except Exception as e:
                 self.logger.warning(f"Failed to get winner name for {longest_user_id}: {e}")
                 winner_name = "Unknown User"
-                
-            points_awarded = self.calculate_points(longest_word)
-            
-            # ★ Award NyxNotes via Memory cog
-            memory_cog = self.bot.get_cog("Memory")
-            if memory_cog:
-                try:
-                    new_total = await memory_cog.add_nyx_notes(longest_user_id, points_awarded)
-                    total_points_awarded += points_awarded  # Add longest word points to total
-                    points_text = f"**{points_awarded} 🪙** awarded!\nNew total: **{new_total:,} 🪙**"
-                except Exception as e:
-                    points_text = f"**{points_awarded} 🪙** (failed to save: {e})"
-            else:
-                points_text = f"**{points_awarded} 🪙** (Memory cog not loaded)"
 
             # ★ Create results embed
             results_embed = discord.Embed(
@@ -420,7 +417,7 @@ class PrefixGame(commands.Cog):
             )
             
             results_embed.add_field(
-                name="Winner",
+                name="Longest Word Winner",
                 value=f"**{winner_name}**",
                 inline=True
             )
@@ -431,95 +428,119 @@ class PrefixGame(commands.Cog):
                 inline=True
             )
             
+            # Show winner's total points
+            winner_total = user_scores.get(longest_user_id, 0)
+            longest_word_points = self.calculate_points(longest_word, True)
             results_embed.add_field(
-                name="Nyx Notes Earned",
-                value=points_text,
+                name="Winner's Score",
+                value=f"**{winner_total} 🪙** total\n(Longest word: {longest_word_points} 🪙)",
+                inline=True
+            )
+            
+            # Show total game statistics
+            total_words = sum(len(words) for words in user_words.values())
+            results_embed.add_field(
+                name="Game Statistics",
+                value=(
+                    f"**{total_points_awarded} 🪙** total awarded\n"
+                    f"**{total_words}** valid words submitted\n"
+                    f"**{len(user_words)}** players participated"
+                ),
                 inline=False
             )
             
-            # Show total points awarded to all players
-            if total_points_awarded > points_awarded:
-                other_points = total_points_awarded - points_awarded
-                results_embed.add_field(
-                    name="Total Game Rewards",
-                    value=f"**{total_points_awarded} 🪙** awarded to all players\n({other_points} 🪙 for other valid words)",
-                    inline=False
-                )
-            
-            # Show other submissions if any
-            if len(user_words) > 1:
-                other_words = []
-                for uid, word in user_words.items():
-                    if uid != longest_user_id:
-                        user_name = "Unknown User"
-                        try:
-                            # Try to get member from guild first
+            # Show top scoring players (limit to top 3 to avoid embed size issues)
+            if len(user_scores) > 1:
+                top_players = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+                player_list = []
+                
+                for i, (uid, score) in enumerate(top_players):
+                    try:
+                        # Try to get member from guild first for display name
+                        if ctx.guild:
                             user = ctx.guild.get_member(uid)
                             if user:
                                 user_name = user.display_name
                             else:
-                                # Try fetching from Discord API
-                                try:
-                                    user = await ctx.guild.fetch_member(uid)
-                                    user_name = user.display_name
-                                except discord.NotFound:
-                                    # User not in guild, try to get user object
-                                    try:
-                                        user = await self.bot.fetch_user(uid)
-                                        user_name = user.display_name or user.name
-                                    except:
-                                        user_name = "Unknown User"
-                                except:
+                                # Fallback to cached user lookup
+                                user = self.bot.get_user(uid)
+                                if user:
+                                    user_name = user.global_name or user.name
+                                else:
                                     user_name = "Unknown User"
-                        except Exception as e:
-                            self.logger.warning(f"Failed to get user name for {uid}: {e}")
-                            user_name = "Unknown User"
-                        other_words.append(f"**{user_name}:** {word} ({len(word)})")
+                        else:
+                            # No guild context, use cached user lookup
+                            user = self.bot.get_user(uid)
+                            if user:
+                                user_name = user.global_name or user.name
+                            else:
+                                user_name = "Unknown User"
+                    except:
+                        user_name = "Unknown User"
+                    
+                    medal = "🥇" if i == 0 else "🥈" if i == 1 else "🥉"
+                    word_count = len(user_words[uid])
+                    player_list.append(f"{medal} **{user_name}:** {score} 🪙 ({word_count} words)")
                 
-                if other_words:
-                    results_embed.add_field(
-                        name="Other Submissions",
-                        value="\n".join(other_words[:5]),  # Limit to 5 to avoid embed limits
-                        inline=False
-                    )
+                results_embed.add_field(
+                    name="Top Players",
+                    value="\n".join(player_list),
+                    inline=False
+                )
             
-            results_embed.set_footer(text=f"Prefix: {prefix.upper()} • Total players: {len(user_words)}")
-            await ctx.send(embed=results_embed)
+            results_embed.set_footer(text=f"Prefix: {prefix.upper()} • All valid words earned points!")
+            
+            # ★ Use safe send with fallback
+            result = await self.bot.safe_send(ctx.channel, embed=results_embed)
+            if not result:
+                fallback_text = (
+                    f"🏆 Game Complete!\n"
+                    f"Longest Word: {winner_name} - {longest_word.upper()} ({len(longest_word)} letters)\n"
+                    f"Total Points Awarded: {total_points_awarded} 🪙"
+                )
+                await self.bot.safe_send(ctx.channel, fallback_text)
             
         except Exception as e:
             # Handle any unexpected errors
+            self.logger.error(f"Error in start_prefix_game: {e}")
             error_embed = discord.Embed(
                 title="Game Error",
                 description=f"An error occurred during the game: {str(e)}",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=error_embed)
-            
+            result = await self.bot.safe_send(ctx.channel, embed=error_embed)
+            if not result:
+                await self.bot.safe_send(ctx.channel, f"❌ Game error: {str(e)}")
 
     # ★ Command to start the game
     @commands.command(name='prefixgame', aliases=['pg', 'wordgame'])
     async def prefixgame_command(self, ctx: commands.Context):
-        """Start the Prefix Word Game - find the longest word with the given prefix!"""
-        await self.start_prefix_game(ctx)
+        """Start the Prefix Word Game - submit as many valid words as possible with the given prefix!"""
+        try:
+            await self.start_prefix_game(ctx)
+        except Exception as e:
+            self.logger.error(f"Error in prefixgame_command: {e}")
+            await self.bot.safe_send(ctx.channel, "❌ Error starting prefix game.")
 
     @commands.command(name='wordcheck', hidden=True)
     async def word_check(self, ctx: commands.Context, word: str, prefix: str = None):
         """Check if a word is valid (for testing purposes)"""
-        if not prefix:
-            if len(word) >= 3:
-                prefix = word[:3]
-            else:
-                await ctx.send("Word too short or no prefix provided.")
-                return
-        
         try:
+            if not prefix:
+                if len(word) >= 3:
+                    prefix = word[:3]
+                else:
+                    await self.bot.safe_send(ctx.channel, "Word too short or no prefix provided.")
+                    return
+            
             # Ensure word lists are loaded
             await self.load_prefix_words()
             await self.load_validation_words()
                 
             word_lower = word.lower()
             is_valid = self.is_valid_word(word, prefix)
-            points = self.calculate_points(word) if is_valid else 0
+            base_points = self.calculate_points(word, False)  # Without longest bonus
+            longest_points = self.calculate_points(word, True)  # With longest bonus
             
             embed = discord.Embed(
                 title="Word Check",
@@ -529,7 +550,15 @@ class PrefixGame(commands.Cog):
             embed.add_field(name="Prefix", value=prefix, inline=True)
             embed.add_field(name="Valid", value="✅ Yes" if is_valid else "❌ No", inline=True)
             embed.add_field(name="Length", value=f"{len(word)} letters", inline=True)
-            embed.add_field(name="Nyx Notes", value=f"{points} 🪙" if is_valid else "0 🪙", inline=True)
+            
+            if is_valid:
+                embed.add_field(
+                    name="Points", 
+                    value=f"Normal: **{base_points} 🪙**\nIf longest: **{longest_points} 🪙**", 
+                    inline=True
+                )
+            else:
+                embed.add_field(name="Points", value="0 🪙", inline=True)
             
             # Show which dictionary was used
             if self.validation_words_cache and len(self.validation_words_cache) > 0:
@@ -539,10 +568,14 @@ class PrefixGame(commands.Cog):
             else:
                 embed.add_field(name="Validation Mode", value="Basic validation (no dictionary)", inline=False)
             
-            await ctx.send(embed=embed)
-            
+            # ★ Use safe send with fallback
+            result = await self.bot.safe_send(ctx.channel, embed=embed)
+            if not result:
+                fallback_text = f"Word: {word} | Valid: {'Yes' if is_valid else 'No'} | Points: {base_points if is_valid else 0} 🪙"
+                await self.bot.safe_send(ctx.channel, fallback_text)
         except Exception as e:
-            await ctx.send(f"Error checking word: {e}")
+            self.logger.error(f"Error in word_check: {e}")
+            await self.bot.safe_send(ctx.channel, f"Error checking word: {e}")
 
 
 # ★ Standard async setup for cog loader

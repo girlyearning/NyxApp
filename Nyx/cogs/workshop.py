@@ -14,7 +14,7 @@ WORKSHOP_REWARD = 20
 NYX_COLOR = 0x76b887  # Consistent with house embed color
 
 # ★ File paths (match persistent storage expectations)
-STORAGE_PATH = "./nyxnotes"
+STORAGE_PATH = os.getenv("STORAGE_PATH", "./nyxnotes")
 os.makedirs(STORAGE_PATH, exist_ok=True)
 SUBMISSIONS_FILE = os.path.join(STORAGE_PATH, "workshop_submissions.json")
 PROMPT_HISTORY_FILE = os.path.join(STORAGE_PATH, "weekend_prompt_history.json")
@@ -167,7 +167,7 @@ class Workshop(commands.Cog):
                 # Move temp file to final location
                 os.rename(temp_file, PROMPT_HISTORY_FILE)
                 
-                self.logger.info(f"Prompt history saved successfully ({len(history)} prompts)")
+                self.logger.debug(f"Prompt history saved successfully ({len(history)} prompts)")
                 
             except Exception as e:
                 self.logger.error(f"Error saving prompt history: {e}")
@@ -223,7 +223,7 @@ class Workshop(commands.Cog):
                 # Move temp file to final location
                 os.rename(temp_file, SUBMISSIONS_FILE)
                 
-                self.logger.info(f"Saved workshop submission for user {user_id}: {day}")
+                self.logger.debug(f"Saved workshop submission for user {user_id}: {day}")
                 
             except Exception as e:
                 self.logger.error(f"Failed to save workshop submission: {e}")
@@ -240,6 +240,9 @@ class Workshop(commands.Cog):
     async def add_points(self, user_id, amount):
         """Award points using Memory cog consistently with other cogs."""
         try:
+            # Add enhanced rate limiting delay
+            await asyncio.sleep(0.2)  # Increased delay
+            
             memory_cog = self.bot.get_cog("Memory")
             if not memory_cog:
                 self.logger.error("Memory cog not loaded - cannot award points")
@@ -261,7 +264,7 @@ class Workshop(commands.Cog):
                 description="Please provide your workshop submission text after the command. No points awarded.",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            await self.bot.safe_send(ctx.channel, embed=embed)
             return
 
         try:
@@ -306,7 +309,17 @@ class Workshop(commands.Cog):
                 icon_url=ctx.author.display_avatar.url
             )
 
-            await ctx.send(embed=embed)
+            # ★ Use safe send with fallback
+            result = await self.bot.safe_send(ctx.channel, embed=embed)
+            if not result:
+                fallback_text = (
+                    f"✅ Workshop Submission Received: {day}\n"
+                    f"Submitted by: {ctx.author.display_name}\n"
+                    f"Nyx Notes Earned: {WORKSHOP_REWARD} 🪙\n"
+                    f"Total Nyx Notes: {total_points:,} 🪙\n"
+                    f"Content: {content.strip()[:200]}{'...' if len(content.strip()) > 200 else ''}"
+                )
+                await self.bot.safe_send(ctx.channel, fallback_text)
 
         except Exception as e:
             self.logger.error(f"Error handling workshop submission: {e}")
@@ -315,27 +328,41 @@ class Workshop(commands.Cog):
                 description=f"There was an error processing your submission: {str(e)}",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            result = await self.bot.safe_send(ctx.channel, embed=embed)
+            if not result:
+                await self.bot.safe_send(ctx.channel, f"❌ Submission Error: {str(e)}")
 
     @commands.command(name="monday")
     async def monday(self, ctx, *, content: str = None):
         """Submit a Monday Workshop entry."""
-        await self.handle_submission(ctx, "Monday", content=content)
+        try:
+            await self.handle_submission(ctx, "Monday", content=content)
+        except Exception as e:
+            self.logger.error(f"Error in monday command: {e}")
 
     @commands.command(name="tuesday")
     async def tuesday(self, ctx, *, content: str = None):
         """Submit a Tuesday Workshop entry."""
-        await self.handle_submission(ctx, "Tuesday", content=content)
+        try:
+            await self.handle_submission(ctx, "Tuesday", content=content)
+        except Exception as e:
+            self.logger.error(f"Error in tuesday command: {e}")
 
     @commands.command(name="thursday")
     async def thursday(self, ctx, *, content: str = None):
         """Submit a Thursday Workshop entry."""
-        await self.handle_submission(ctx, "Thursday", content=content)
+        try:
+            await self.handle_submission(ctx, "Thursday", content=content)
+        except Exception as e:
+            self.logger.error(f"Error in thursday command: {e}")
 
     @commands.command(name="friday")
     async def friday(self, ctx, *, content: str = None):
         """Submit a Friday Workshop entry."""
-        await self.handle_submission(ctx, "Friday", content=content)
+        try:
+            await self.handle_submission(ctx, "Friday", content=content)
+        except Exception as e:
+            self.logger.error(f"Error in friday command: {e}")
 
     @commands.command(name="weekend")
     async def weekend(self, ctx):
@@ -353,31 +380,51 @@ class Workshop(commands.Cog):
                 available_prompts = self.prompt_prompts.copy()
                 random.shuffle(available_prompts)
             
-            prompt = random.choice(available_prompts)
-            prompt_history.append(prompt)
+            # Select next prompt
+            selected_prompt = available_prompts[0]
+            prompt_history.append(selected_prompt)
             await self.set_prompt_history(prompt_history)
             
             embed = discord.Embed(
-                title="📝 Weekend Writing Workshop",
-                description=f"It's time for your weekend writing challenge!\n\n**Prompt:**\n```{prompt}```",
+                title="📝 Weekend Writing Prompt",
+                description=selected_prompt,
                 color=NYX_COLOR
             )
-            embed.set_footer(text="Use !weekendsubmit [your response] to submit your answer and earn Nyx Notes!")
-            await ctx.send(embed=embed)
+            embed.add_field(
+                name="How to Submit",
+                value="Use `!weekendsubmit <your writing>` to submit your response",
+                inline=False
+            )
+            embed.set_footer(text="Weekend Workshop • Atypical Asylum")
+            
+            # ★ Use safe send with fallback
+            result = await self.bot.safe_send(ctx.channel, embed=embed)
+            if not result:
+                fallback_text = (
+                    f"📝 Weekend Writing Prompt\n"
+                    f"{selected_prompt}\n\n"
+                    f"Use !weekendsubmit <your writing> to submit your response"
+                )
+                await self.bot.safe_send(ctx.channel, fallback_text)
             
         except Exception as e:
             self.logger.error(f"Error generating weekend prompt: {e}")
             embed = discord.Embed(
-                title="❌ Prompt Error",
-                description=f"There was an error generating the weekend prompt: {str(e)}",
+                title="❌ Error",
+                description="Failed to generate weekend prompt. Please try again.",
                 color=discord.Color.red()
             )
-            await ctx.send(embed=embed)
+            result = await self.bot.safe_send(ctx.channel, embed=embed)
+            if not result:
+                await self.bot.safe_send(ctx.channel, "❌ Failed to generate weekend prompt. Please try again.")
 
     @commands.command(name="weekendsubmit")
     async def weekendsubmit(self, ctx, *, content: str = None):
-        """Weekend submission command — handled like other submission commands."""
-        await self.handle_submission(ctx, "Weekend", content=content)
+        """Submit a weekend workshop entry."""
+        try:
+            await self.handle_submission(ctx, "Weekend", content=content)
+        except Exception as e:
+            self.logger.error(f"Error in weekendsubmit command: {e}")
 
 # ★ Standard async setup function for bot loading (consistent with other cogs)
 async def setup(bot):
