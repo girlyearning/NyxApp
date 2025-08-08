@@ -1,0 +1,129 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Environment Variables - Contains API keys and sensitive data
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+
+# API Keys and Secrets
+**/secrets.json
+**/credentials.json
+**/config/secrets.*
+**/*secret*
+**/*key*.json
+
+# Build artifacts (exclude - can be regenerated from source)
+build/
+*.aab
+*.app
+*.exe
+*.dmg
+# Keep release APKs: *.apk files will be tracked for GitHub releases
+
+# Python virtual environment and cache
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Server and API logs
+api_server.log
+server.log
+nyx.log
+
+# Android specific sensitive files
+android/local.properties
+android/key.properties
+android/*.keystore
+android/*.jks
+android/*.p12
+android/app/google-services.json
+android/app/src/main/res/values/secrets.xml
+
+# iOS specific sensitive files
+ios/Runner/GoogleService-Info.plist
+ios/ServiceDefinitions.json
+ios/Runner.xcworkspace/xcshareddata/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/*.mobileprovision
+ios/*.p12
+ios/*.cer
+
+# User data and app state
+**/data/
+**/cache/
+user_data/
+app_data/
+
+# Test coverage and reports
+coverage/
+test_reports/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+**/ephemeral/
+
+# API testing and debugging
+*.har
+api_test_results/
+debug_logs/
+
+# Backup files
+*.backup
+*.bak
+*~

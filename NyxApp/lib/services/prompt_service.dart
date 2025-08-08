@@ -20,6 +20,42 @@ class PromptService {
       - "If your inner critic had a day off, what would you tell yourself instead?"
       
       Generate a NEW prompt in this style:''';
+    } else if (promptType == 'adhd') {
+      promptRequest = '''Generate a journal prompt specifically designed for someone with ADHD. 
+      The prompt should help with ADHD-specific challenges like executive function, time blindness, emotional regulation, 
+      hyperfocus, task initiation, or working memory. Make it actionable and structured to help with ADHD thought patterns.
+      Keep it to 1-2 sentences and make it ADHD-friendly (clear, specific, engaging).
+      
+      Examples of good ADHD prompts:
+      - "What's one task you've been avoiding? Break it down into 3 tiny steps you could do in 5 minutes each."
+      - "Describe your current hyperfocus topic and how you could use this interest to tackle something on your to-do list."
+      - "What time of day does your brain work best? What could you schedule during that golden hour tomorrow?"
+      
+      Generate ONLY the NEW prompt for ADHD (no explanation, reasoning, or context about ADHD):''';
+    } else if (promptType == 'asd') {
+      promptRequest = '''Generate a journal prompt specifically designed for someone with autism/ASD. 
+      The prompt should help with autism-specific experiences like sensory processing, social situations, routine changes, 
+      special interests, masking, or pattern recognition. Make it clear and literal, avoiding abstract metaphors.
+      Keep it to 1-2 sentences and make it autism-friendly (specific, structured, predictable).
+      
+      Examples of good autism/ASD prompts:
+      - "What sensory experience today was most comfortable or uncomfortable? Describe the specific details."
+      - "Write about a social rule you've observed that doesn't make logical sense to you."
+      - "Describe your favorite routine and why each step is important to you."
+      
+      Generate ONLY the NEW prompt for ASD (no explanation, reasoning, or context about autism):''';
+    } else if (promptType == 'audhd') {
+      promptRequest = '''Generate a journal prompt specifically designed for someone with both ADHD and autism (AuDHD). 
+      The prompt should address the unique intersection of both conditions, like conflicting needs (routine vs novelty), 
+      executive dysfunction with sensory issues, or hyperfocus on special interests. Be understanding of internal conflicts.
+      Keep it to 1-2 sentences and acknowledge the dual experience.
+      
+      Examples of good AuDHD prompts:
+      - "How do you balance your need for routine (autism) with your need for novelty (ADHD) today?"
+      - "Describe a time when your ADHD and autism traits worked together as a superpower."
+      - "What's one accommodation you wish you could have that would help both your ADHD and autism?"
+      
+      Generate ONLY the NEW prompt for AuDHD (no explanation, reasoning, or context about ADHD or autism):''';
     } else {
       promptRequest = '''Generate a general, creative journal prompt that's engaging and thought-provoking but not focused on mental health. 
       This should be fun, imaginative, or intellectually stimulating. Topics could include creativity, memories, hypotheticals, 
@@ -70,6 +106,45 @@ class PromptService {
       ];
       final index = DateTime.now().millisecondsSinceEpoch % introspectivePrompts.length;
       return introspectivePrompts[index];
+    } else if (promptType == 'adhd') {
+      final adhdPrompts = [
+        "What's one task you've been avoiding? Break it down into 3 tiny steps you could do in 5 minutes each.",
+        "Rate your focus level right now from 1-10. What one thing could shift it up by just one point?",
+        "What did you hyperfocus on recently? How did it feel during and after?",
+        "Name 3 things in your environment right now that are either helping or hindering your focus.",
+        "What's your biggest win from today, even if it seems small?",
+        "If you could only do ONE thing tomorrow, what would make you feel most accomplished?",
+        "What reminder do you need to hear right now? Write it as if you're texting a friend.",
+        "Describe your ideal workspace for maximum focus. What's one element you could add today?",
+      ];
+      final index = DateTime.now().millisecondsSinceEpoch % adhdPrompts.length;
+      return adhdPrompts[index];
+    } else if (promptType == 'asd') {
+      final asdPrompts = [
+        "What sensory experience today was most comfortable or uncomfortable? Describe the specific details.",
+        "Which part of your routine brought you the most comfort today?",
+        "Write about a social situation you navigated today. What worked and what didn't?",
+        "What pattern did you notice today that others might have missed?",
+        "Describe your current special interest and one new thing you learned about it.",
+        "What's one way you accommodated your own needs today?",
+        "Write about a texture, sound, or sensation you encountered today and how it affected you.",
+        "What's one social expectation you'd like to opt out of, and why?",
+      ];
+      final index = DateTime.now().millisecondsSinceEpoch % asdPrompts.length;
+      return asdPrompts[index];
+    } else if (promptType == 'audhd') {
+      final audhdPrompts = [
+        "How did your need for routine clash with your need for novelty today?",
+        "What's one way your autism and ADHD traits complemented each other recently?",
+        "Describe a moment when you needed both stimulation AND quiet. How did you handle it?",
+        "What special interest are you currently hyperfocusing on? How does it bring you joy?",
+        "Write about a time today when you had to choose between structure and spontaneity.",
+        "What's one thing that helps both your ADHD brain and your autistic brain feel calm?",
+        "How did masking and impulsivity interact for you in a recent social situation?",
+        "What's one accommodation that would help both sides of your neurotype?",
+      ];
+      final index = DateTime.now().millisecondsSinceEpoch % audhdPrompts.length;
+      return audhdPrompts[index];
     } else {
       final generalPrompts = [
         "If you could master any skill instantly, what would it be and how would you use it?",
