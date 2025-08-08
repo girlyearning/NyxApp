@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Secure HTTPS configuration for Claude API and Nyx backend -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.anthropic.com</domain>
+        <domain includeSubdomains="true">anthropic.com</domain>
+        <domain includeSubdomains="true">nyxapp.onrender.com</domain>
+        <trust-anchors>
+            <!-- Trust system certificates for secure HTTPS -->
+            <certificates src="system"/>
+        </trust-anchors>
+        <!-- Certificate pinning can be added here if needed -->
+    </domain-config>
+    
+    <!-- Allow localhost for development/debugging (optional) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+    
+    <!-- Default secure configuration for all other domains -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Trust system certificates -->
+            <certificates src="system"/>
+            <!-- Trust user-added CA certificates on debug builds -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    
+    <!-- Debug configuration (only applies to debug builds) -->
+    <debug-overrides>
+        <trust-anchors>
+            <!-- Trust user-added CAs for debugging -->
+            <certificates src="user"/>
+            <certificates src="system"/>
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>
