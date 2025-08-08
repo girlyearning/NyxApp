@@ -1,0 +1,31 @@
+# Nyx API Server Requirements
+
+# Core FastAPI dependencies
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+pydantic>=2.4.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+
+# CORS support
+starlette>=0.27.0
+
+# Optional: For future Claude API integration
+anthropic>=0.58.2
+
+# Optional: For enhanced logging and monitoring
+structlog>=23.2.0
+
+# Optional: For database integration (if needed later)
+# sqlalchemy>=2.0.0
+# alembic>=1.12.0
+
+# Optional: For authentication (if needed later)
+# python-jose[cryptography]>=3.3.0
+# passlib[bcrypt]>=1.7.4
+
+# Development dependencies (install with: pip install -r api_requirements.txt -r api_dev_requirements.txt)
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# httpx>=0.25.0  # For testing FastAPI endpoints
