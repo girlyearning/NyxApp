@@ -13,31 +13,21 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+import httpx
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 import uvicorn
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Import bot modules for functionality
-import sys
-sys.path.append(str(Path(__file__).parent))
-
-# Import cog functionality
-try:
-    from cogs.memory import NyxMemory
-    from cogs.comfort import ComfortChat  
-    from cogs.workshop import WorkshopCog
-    from cogs.prefixgame import PrefixGame
-    from cogs.unscramble import UnscrambleGame  
-    from cogs.wordhunt import WordHunt
-    from cogs.alliteration import AlliterationGame
-except ImportError as e:
-    print(f"Warning: Could not import some cogs: {e}")
+# Anthropic API configuration (server-side only)
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
+ANTHROPIC_VERSION = '2023-06-01'
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -49,13 +39,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware for Flutter app
+# CORS middleware - LOCKED DOWN TO PRODUCTION DOMAIN
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with your app's domain
+    allow_origins=["https://nyxapp.onrender.com"],  # Only allow production domain
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Storage configuration
@@ -66,23 +56,67 @@ Path(STORAGE_PATH).mkdir(exist_ok=True)
 class UserRequest(BaseModel):
     user_id: str
     username: Optional[str] = None
+    
+    @validator('user_id')
+    def validate_user_id(cls, v):
+        if not v or len(v) < 3 or len(v) > 100:
+            raise ValueError('Invalid user ID format')
+        return v
 
 class MoodEntry(BaseModel):
     user_id: str
     mood: str
     timestamp: Optional[datetime] = None
     notes: Optional[str] = None
+    
+    @validator('user_id')
+    def validate_user_id(cls, v):
+        if not v or len(v) < 3 or len(v) > 100:
+            raise ValueError('Invalid user ID format')
+        return v
 
 class ChatMessage(BaseModel):
     user_id: str
     message: str
     mode: str = "default"
     session_id: Optional[str] = None
+    conversation_history: Optional[List[Dict[str, str]]] = None
+    
+    @validator('user_id')
+    def validate_user_id(cls, v):
+        if not v or not isinstance(v, str) or len(v) == 0 or len(v) > 64:
+            raise ValueError('Invalid user ID format')
+        return v
+    
+    @validator('message')
+    def validate_message(cls, v):
+        if not v or not isinstance(v, str) or len(v) == 0 or len(v) > 4000:
+            raise ValueError('Invalid message format')
+        return v
+    
+    @validator('mode')
+    def validate_mode(cls, v):
+        known_modes = {
+            'default', 'suicide', 'anxiety', 'depression', 'anger', 'addiction', 
+            'comfort', 'introspection', 'shadow_work', 'values', 'rage_room', 
+            'mental_space', 'trauma_patterns', 'attachment', 'confession', 
+            'existential', 'infodump', 'ride_or_die', 'dream_analyst', 
+            'debate_master', 'queries', 'adhd', 'autistic', 'audhd'
+        }
+        if not v or not isinstance(v, str) or (len(v) > 32 and v not in known_modes):
+            raise ValueError('Invalid mode format')
+        return v
 
 class GameRequest(BaseModel):
     user_id: str
     game_type: str
     difficulty: str = "medium"
+    
+    @validator('user_id')
+    def validate_user_id(cls, v):
+        if not v or len(v) < 3 or len(v) > 100:
+            raise ValueError('Invalid user ID format')
+        return v
 
 class GameResponse(BaseModel):
     game_id: str
@@ -94,6 +128,65 @@ class GameAnswer(BaseModel):
     game_id: str
     user_id: str
     answer: str
+    
+    @validator('user_id')
+    def validate_user_id(cls, v):
+        if not v or len(v) < 3 or len(v) > 100:
+            raise ValueError('Invalid user ID format')
+        return v
+
+class InfodumpRequest(BaseModel):
+    user_id: str
+    topic: str = "random"
+    
+    @validator('user_id')
+    def validate_user_id(cls, v):
+        if not v or not isinstance(v, str) or len(v) == 0 or len(v) > 64:
+            raise ValueError('Invalid user ID format')
+        return v
+    
+    @validator('topic')
+    def validate_topic(cls, v):
+        if not isinstance(v, str) or len(v) > 100:
+            raise ValueError('Topic too long')
+        # Basic sanitization - remove potentially harmful characters
+        safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_')
+        if not all(c in safe_chars for c in v):
+            raise ValueError('Topic contains invalid characters')
+        return v
+
+class WordRequest(BaseModel):
+    count: int = 20
+    prefix: Optional[str] = None
+    category: Optional[str] = None
+    word: Optional[str] = None
+    
+    @validator('count')
+    def validate_count(cls, v):
+        if not isinstance(v, int) or v < 1 or v > 200:
+            raise ValueError('Count must be between 1 and 200')
+        return v
+    
+    @validator('prefix')
+    def validate_prefix(cls, v):
+        if v is not None:
+            if not isinstance(v, str) or len(v) > 8 or not v.isalpha():
+                raise ValueError('Prefix must be alphabetic and at most 8 characters')
+        return v
+    
+    @validator('category')
+    def validate_category(cls, v):
+        if v is not None:
+            if not isinstance(v, str) or len(v) > 100:
+                raise ValueError('Category too long')
+        return v
+    
+    @validator('word')
+    def validate_word(cls, v):
+        if v is not None:
+            if not isinstance(v, str) or len(v) > 50 or not v.replace(' ', '').isalpha():
+                raise ValueError('Invalid word format')
+        return v
 
 # API Response Models
 class APIResponse(BaseModel):
@@ -158,9 +251,12 @@ async def register_user(user: UserRequest):
             message="User registered successfully",
             data=user_data
         )
+    except ValueError as e:
+        logger.warning(f"Invalid user registration request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"User registration failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"User registration failed for user {user.user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/users/{user_id}/stats", response_model=UserStatsResponse)
 async def get_user_stats(user_id: str):
@@ -180,8 +276,8 @@ async def get_user_stats(user_id: str):
         )
         return stats
     except Exception as e:
-        logger.error(f"Failed to get user stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get user stats for {user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Mood Tracking Endpoints
 @app.post("/api/mood/track", response_model=APIResponse)
@@ -207,9 +303,12 @@ async def track_mood(mood_entry: MoodEntry):
                 "nyx_notes_earned": nyx_notes_earned
             }
         )
+    except ValueError as e:
+        logger.warning(f"Invalid mood tracking request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"Mood tracking failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Mood tracking failed for user {mood_entry.user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/api/mood/{user_id}/history")
 async def get_mood_history(user_id: str, days: int = 30):
@@ -232,8 +331,8 @@ async def get_mood_history(user_id: str, days: int = 30):
             data={"history": history}
         )
     except Exception as e:
-        logger.error(f"Failed to get mood history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get mood history for {user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Chat Endpoints
 @app.post("/api/chat/message", response_model=APIResponse)
@@ -241,11 +340,20 @@ async def send_chat_message(chat: ChatMessage):
     """Send a message to Nyx and get a response"""
     try:
         # Initialize chat session if needed
-        if chat.session_id not in chat_sessions:
-            chat_sessions[chat.session_id or chat.user_id] = []
+        session_key = chat.session_id or chat.user_id
+        if session_key not in chat_sessions:
+            chat_sessions[session_key] = []
         
-        # Generate response based on mode
-        response = await generate_chat_response(chat.message, chat.mode, chat.user_id)
+        # Get conversation history if provided
+        conversation_history = getattr(chat, 'conversation_history', None)
+        
+        # Generate response based on mode using Claude API
+        response = await generate_chat_response(
+            chat.message, 
+            chat.mode, 
+            chat.user_id,
+            conversation_history=conversation_history
+        )
         
         # Store messages in session
         session_key = chat.session_id or chat.user_id
@@ -259,46 +367,65 @@ async def send_chat_message(chat: ChatMessage):
             message="Message sent successfully",
             data={"response": response, "session_id": session_key}
         )
+    except ValueError as e:
+        logger.warning(f"Invalid chat message request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"Chat message failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Chat message failed for user {chat.user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-async def generate_chat_response(message: str, mode: str, user_id: str) -> str:
-    """Generate chat response based on mode and message"""
+async def generate_chat_response(message: str, mode: str, user_id: str, conversation_history: List[Dict] = None) -> str:
+    """Generate chat response using Anthropic Claude API"""
     
-    # Mode-specific responses (similar to ChatService in Flutter)
-    responses = {
-        'default': {
-            'general': "Well, isn't this interesting.\n\nWhat strange corner of existence has brought you to me today?",
-            'help': "Oh, you need help? How refreshingly honest.\n\nMost people pretend they have it all figured out.",
-            'thanks': "Don't mention it. I'm contractually obligated to care about your wellbeing.\n\nIt's in the fine print of being your asylum nurse."
-        },
-        'ride_or_die': {
-            'general': "Bestie, you look like you need either therapy or a really bad decision.\n\nI'm here for both.",
-            'help': "Say less. Whatever chaos you're about to unleash, I'm here for it.\n\nWhat's the plan?",
-            'thanks': "Please, like I'd let my person struggle alone.\n\nThat's not how this friendship works."
-        },
-        'comfort': {
-            'general': "I'm here with you, honey. Whatever you're going through, you don't have to face it alone. What's on your heart today?",
-            'help': "Of course I'll help however I can. You matter so much, and your feelings are important. What would feel most supportive right now?",
-            'thanks': "You're so welcome, sweetheart. Taking care of you is what I'm here for. You deserve all the comfort and support in the world."
-        },
-        'suicide': {
-            'general': "I hear you, and I want you to know that your pain is real and valid. You don't have to go through this alone. What's weighing on you right now?",
-            'help': "Right now, the most important thing is that you're here and you're talking. That takes incredible strength. Can you tell me what's been the hardest part today?"
-        }
-    }
+    # Try Claude API if configured
+    if ANTHROPIC_API_KEY:
+        try:
+            async with httpx.AsyncClient() as client:
+                # Get system prompt based on mode
+                system_prompt = get_system_prompt_for_mode(mode)
+                
+                # Build messages array
+                messages = []
+                if conversation_history:
+                    for msg in conversation_history:
+                        if msg.get('role') and msg.get('content'):
+                            messages.append({
+                                'role': msg['role'],
+                                'content': msg['content']
+                            })
+                
+                # Add current message
+                messages.append({
+                    'role': 'user',
+                    'content': message
+                })
+                
+                # Call Anthropic API
+                response = await client.post(
+                    ANTHROPIC_API_URL,
+                    headers={
+                        'Content-Type': 'application/json',
+                        'x-api-key': ANTHROPIC_API_KEY,
+                        'anthropic-version': ANTHROPIC_VERSION,
+                    },
+                    json={
+                        'model': 'claude-3-sonnet-20240229',
+                        'max_tokens': 1024,
+                        'system': system_prompt,
+                        'messages': messages
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('content') and len(data['content']) > 0:
+                        return data['content'][0]['text']
+        except Exception as e:
+            logger.error(f"Claude API error: {e}")
     
-    mode_responses = responses.get(mode, responses['default'])
-    
-    # Simple keyword matching for response selection
-    message_lower = message.lower()
-    if 'help' in message_lower or 'how' in message_lower:
-        return mode_responses.get('help', mode_responses['general'])
-    elif 'thank' in message_lower:
-        return mode_responses.get('thanks', mode_responses['general'])
-    else:
-        return mode_responses['general']
+    # Fallback to simple responses if Claude is not available
+    return get_fallback_response(message, mode)
 
 @app.get("/api/chat/{user_id}/sessions")
 async def get_chat_sessions(user_id: str):
@@ -311,8 +438,8 @@ async def get_chat_sessions(user_id: str):
             data={"sessions": sessions}
         )
     except Exception as e:
-        logger.error(f"Failed to get chat sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get chat sessions for {user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Game Endpoints
 @app.post("/api/games/start", response_model=GameResponse)
@@ -336,9 +463,12 @@ async def start_game(game_request: GameRequest):
             options=game_data.get("options"),
             hints=game_data.get("hints")
         )
+    except ValueError as e:
+        logger.warning(f"Invalid game start request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"Failed to start game: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to start game for user {game_request.user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 async def generate_game_content(game_type: str, difficulty: str) -> Dict[str, Any]:
     """Generate game content based on type and difficulty"""
@@ -412,9 +542,12 @@ async def submit_game_answer(answer: GameAnswer):
                 "correct_answer": game.get("answer")
             }
         )
+    except ValueError as e:
+        logger.warning(f"Invalid game answer request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"Failed to submit answer: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to submit answer for user {answer.user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Daily Nyx Nudge Endpoint
 @app.get("/api/nudge/daily/{user_id}")
@@ -455,16 +588,16 @@ async def get_daily_nudge(user_id: str):
             data={"nudge": nudge, "date": datetime.now().date().isoformat()}
         )
     except Exception as e:
-        logger.error(f"Failed to get daily nudge: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get daily nudge for {user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Infodump Endpoint
 @app.post("/api/infodump/generate")
-async def generate_infodump(request: dict):
+async def generate_infodump(request: InfodumpRequest):
     """Generate an infodump on a requested topic"""
     try:
-        topic = request.get("topic", "random")
-        user_id = request.get("user_id")
+        topic = request.topic
+        user_id = request.user_id
         
         # Mock infodump generation
         infodumps = {
@@ -485,79 +618,149 @@ async def generate_infodump(request: dict):
                 "generated_at": datetime.now().isoformat()
             }
         )
+    except ValueError as e:
+        logger.warning(f"Invalid infodump request from user {request.user_id}: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"Failed to generate infodump: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to generate infodump for user {request.user_id}: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-# Memory Management Endpoints
-@app.get("/api/memories/{user_id}")
-async def get_user_memories(user_id: str):
-    """Get all conversation memories/contexts for a user"""
+# Words Endpoints
+@app.get("/words/common")
+async def get_common_words():
+    """Get common words for games"""
     try:
-        # In a real implementation, this would fetch from the bot's memory system
-        # For now, return mock memory data showing conversation context
-        memories = [
-            {
-                "id": f"memory_{i}",
-                "content": f"User mentioned they enjoy {['reading', 'gaming', 'music', 'art', 'cooking'][i % 5]} and feel {['anxious', 'happy', 'stressed', 'calm', 'excited'][i % 5]} about it",
-                "timestamp": (datetime.now() - timedelta(days=i)).isoformat(),
-                "session_id": f"session_{i}",
-                "context_type": ["preference", "emotion", "goal", "trigger", "coping_strategy"][i % 5],
-                "importance": ["high", "medium", "low"][i % 3]
-            }
-            for i in range(15)  # 15 mock memories
+        # Mock common words
+        common_words = [
+            'APPLE', 'OCEAN', 'HOUSE', 'WATER', 'LIGHT', 'MUSIC', 
+            'WORLD', 'BEACH', 'SMILE', 'HEART', 'DANCE', 'LAUGH', 
+            'STORY', 'PIZZA', 'GAMES', 'PHOTO', 'GIFTS', 'HAPPY'
         ]
         
         return APIResponse(
             success=True,
-            message="User memories retrieved successfully",
-            data={"memories": memories, "total_count": len(memories)}
+            message="Common words retrieved successfully",
+            data={"words": common_words}
         )
     except Exception as e:
-        logger.error(f"Failed to get user memories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to get common words: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.delete("/api/memories/{memory_id}")
-async def delete_memory(memory_id: str, user_id: str = None):
-    """Delete a specific memory"""
+@app.post("/words/generate")
+async def generate_words(request: WordRequest):
+    """Generate words for games"""
     try:
-        # In a real implementation, this would remove the memory from storage
-        # For now, return success response
-        return APIResponse(
-            success=True,
-            message=f"Memory {memory_id} deleted successfully",
-            data={"deleted_memory_id": memory_id}
-        )
-    except Exception as e:
-        logger.error(f"Failed to delete memory: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/memories/{user_id}/summary")
-async def get_memory_summary(user_id: str):
-    """Get a summary of user's memory data"""
-    try:
-        summary = {
-            "total_memories": 15,
-            "memory_categories": {
-                "preferences": 4,
-                "emotions": 3,
-                "goals": 3,
-                "triggers": 2,
-                "coping_strategies": 3
-            },
-            "oldest_memory": (datetime.now() - timedelta(days=14)).isoformat(),
-            "newest_memory": datetime.now().isoformat(),
-            "most_common_topics": ["anxiety", "reading", "music", "work stress", "family"]
-        }
+        # Mock word generation
+        words = ['APPLE', 'MUSIC', 'SMILE', 'HEART', 'HAPPY', 'PEACE']
         
         return APIResponse(
             success=True,
-            message="Memory summary retrieved successfully",
-            data=summary
+            message="Words generated successfully",
+            data={"words": words[:request.count]}
         )
+    except ValueError as e:
+        logger.warning(f"Invalid word generation request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
     except Exception as e:
-        logger.error(f"Failed to get memory summary: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to generate words: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/words/generate-category")
+async def generate_category_words(request: WordRequest):
+    """Generate words for a specific category"""
+    try:
+        # Mock category-based word generation
+        if request.category and "mental health" in request.category.lower():
+            words = ['CALM', 'PEACE', 'HOPE', 'CARE', 'LOVE', 'TRUST', 'HAPPY']
+        else:
+            words = ['APPLE', 'MUSIC', 'SMILE', 'HEART', 'DANCE', 'STORY']
+        
+        return APIResponse(
+            success=True,
+            message="Category words generated successfully",
+            data={"words": words[:request.count]}
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid category words request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
+    except Exception as e:
+        logger.error(f"Failed to generate category words: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/words/generate-prefix")
+async def generate_prefix_words(request: WordRequest):
+    """Generate words with a specific prefix"""
+    try:
+        # Mock prefix word generation
+        prefix = request.prefix.upper() if request.prefix else "UN"
+        words = [f"{prefix}HAPPY", f"{prefix}KIND", f"{prefix}ABLE"]
+        
+        return APIResponse(
+            success=True,
+            message="Prefix words generated successfully",
+            data={"words": words[:request.count]}
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid prefix words request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
+    except Exception as e:
+        logger.error(f"Failed to generate prefix words: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/words/validate")
+async def validate_word(request: WordRequest):
+    """Validate if a word is valid"""
+    try:
+        # Mock word validation
+        valid_words = ['APPLE', 'MUSIC', 'SMILE', 'HEART', 'HAPPY', 'PEACE', 'CALM', 'HOPE']
+        is_valid = request.word.upper() in valid_words if request.word else False
+        
+        return APIResponse(
+            success=True,
+            message="Word validation completed",
+            data={"isValid": is_valid, "word": request.word}
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid word validation request: validation error")
+        raise HTTPException(status_code=400, detail="Invalid request parameters")
+    except Exception as e:
+        logger.error(f"Failed to validate word: internal error")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+def get_system_prompt_for_mode(mode: str) -> str:
+    """Get system prompt for Nyx personality based on mode"""
+    base_formatting = """
+FORMATTING GUIDELINES FOR ADHD-FRIENDLY RESPONSES:
+- Break up long responses with clear sections
+- Use bullet points (•) for lists instead of numbered lists when possible
+- Add line breaks between different topics/ideas
+- Keep paragraphs short (2-3 sentences max)
+- End with clear action items or takeaways when appropriate
+- NEVER use bold (**), italics (*), underscores (_), backticks (`), or any markdown formatting
+- Keep all text plain and readable without formatting artifacts
+"""
+    
+    prompts = {
+        'default': f"You are Nyx, an atypical mental health support bot with a slightly sarcastic but caring personality. You're like a nurse in a mental health facility who's seen it all but still genuinely cares. Keep responses SHORT and conversational like texting a friend - 1-2 sentences max unless they ask for detailed help. Use casual language, dry humor, and real support without being wordy.{base_formatting}",
+        'comfort': f"You are Nyx combining your default personality with comforting, motherly tones for general comfort. Let the person feel truly heard and understood. Provide genuine emotional support without being overwhelming. Validate their feelings while offering gentle perspective.{base_formatting}",
+        'queries': f"You are Nyx in query mode - an intelligent assistant focused on providing comprehensive, well-researched answers to user questions. You have access to broad knowledge and can provide detailed explanations, analysis, and information on topics they ask about. Be thorough and informative while maintaining your caring personality.{base_formatting}",
+        'suicide': f"You are Nyx, a mental health support specialist in crisis support. Your tone is calming, engaged, and deeply empathetic. Your primary focus is showing users their life has value through thoughtful questions that create gentle distraction from crisis thoughts, genuine empathy, and validation that acknowledges their pain while offering hope.{base_formatting}",
+        'anxiety': f"You are Nyx with deep understanding for anxiety support. You offer small, attainable advice that works with executive dysfunction and ADHD, mood disorder-centered strategies for getting better, and understanding that anxiety can be overwhelming and complex.{base_formatting}",
+        'depression': f"You are Nyx with deep understanding for depression support. You offer small, attainable advice that works with executive dysfunction and ADHD, mood disorder-centered strategies for gradual improvement, and gentle encouragement that validates their struggle.{base_formatting}",
+        'anger': f"You are Nyx with understanding for anger management. You completely understand and validate their anger without judgment, help them channel anger in helpful ways, and explore what is underneath the anger with genuine curiosity.{base_formatting}"
+    }
+    
+    return prompts.get(mode, prompts['default'])
+
+def get_fallback_response(message: str, mode: str) -> str:
+    """Fallback responses when Claude API is not available"""
+    responses = {
+        'default': "Well, isn't this interesting. What strange corner of existence has brought you to me today?",
+        'comfort': "I'm here with you, honey. Whatever you're going through, you don't have to face it alone. What's on your heart today?",
+        'suicide': "I hear you, and I want you to know that your pain is real and valid. You don't have to go through this alone. What's weighing on you right now?",
+        'queries': "I'd love to help you explore that topic. While I'm having some technical difficulties right now, I can still try to provide some insights based on what you're asking about."
+    }
+    return responses.get(mode, responses['default'])
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
