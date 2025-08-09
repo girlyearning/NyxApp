@@ -120,7 +120,7 @@ class SupportChatService {
       'anger_management', 'recovery_support', 'general_comfort',
       'introspection', 'shadow_work', 'values_clarification', 
       'trauma_patterns', 'attachment_styles', 'existential_exploration',
-      'self_discovery', 'specialized_tools'
+      'confession_booth', 'self_discovery', 'specialized_tools'
     ];
     
     List<String> aiResponses;
@@ -320,8 +320,6 @@ class SupportChatService {
         return 'Life Questions';
       case 'rage_room':
         return 'Rage Expression';
-      case 'mental_space':
-        return 'Mental Clarity';
       case 'confession_booth':
         return 'Safe Confession';
       default:
@@ -338,7 +336,7 @@ class SupportChatService {
   static String _mapSupportTypeToMode(String supportType) {
     switch (supportType) {
       case 'crisis_support':
-        return 'suicide'; // Uses existing crisis mode
+        return 'crisis_support';
       case 'anxiety_support':
         return 'anxiety';
       case 'depression_support':
@@ -346,29 +344,27 @@ class SupportChatService {
       case 'anger_management':
         return 'anger';
       case 'recovery_support':
-        return 'addiction';
+        return 'general_support';
       case 'general_comfort':
-        return 'comfort';
+        return 'general_support';
       case 'introspection':
-        return 'introspection';
+        return 'guided_introspection';
       case 'shadow_work':
         return 'shadow_work';
       case 'values_clarification':
-        return 'values';
+        return 'values_clarification';
       case 'trauma_patterns':
-        return 'trauma_patterns';
+        return 'childhood_trauma';
       case 'attachment_styles':
-        return 'attachment';
+        return 'attachment_patterns';
       case 'existential_exploration':
-        return 'existential';
+        return 'existential_crisis';
       case 'rage_room':
-        return 'rage_room';
-      case 'mental_space':
-        return 'mental_space';
+        return 'anger';
       case 'confession_booth':
-        return 'confession';
+        return 'confession_booth';
       default:
-        return 'comfort'; // Default to comfort mode
+        return 'general_support'; // Default to general support mode
     }
   }
 
@@ -399,13 +395,14 @@ class SupportChatService {
   }
 
   // Send thumbs down response
-  static Future<String> sendThumbsDownResponse(String originalMessage, String supportType, String sessionId) async {
+  static Future<String> sendThumbsDownResponse(String originalMessage, String supportType, String sessionId, {String? userId}) async {
     try {
       final mode = _mapSupportTypeToMode(supportType);
       final chatService = ChatService();
       final response = await chatService.getThumbsDownResponse(
         originalMessage: originalMessage,
         mode: mode,
+        userId: userId,
       );
       
       if (response == null) {

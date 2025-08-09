@@ -46,7 +46,7 @@ class _FolderManagementScreenState extends State<FolderManagementScreen> {
             border: OutlineInputBorder(),
           ),
           maxLength: 50,
-          autofocus: true,
+          autofocus: false,
         ),
         actions: [
           TextButton(

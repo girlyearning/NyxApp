@@ -1,6 +1,5 @@
-import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'chat_service.dart';
+import 'api_service.dart';
 
 class MentalHealthInfodumpService {
   static const String _infodumpPrefix = 'mental_health_infodump_';
@@ -16,10 +15,8 @@ class MentalHealthInfodumpService {
     'Mental Wellness and Sleep': 'mental_wellness_sleep',
   };
 
-  static final ChatService _chatService = ChatService();
-
-  // Generate infodump content using Claude API
-  static Future<String> _generateInfodumpContent(String topic, String topicKey) async {
+  // Generate infodump content using API
+  static Future<String> _generateInfodumpContent(String topic, String topicKey, String userId) async {
     final prompts = {
       'anxiety_disorders': '''Generate a comprehensive, informative infodump about Understanding Anxiety Disorders. 
       Cover: types of anxiety disorders, symptoms, causes, how they affect daily life, common misconceptions, 
@@ -56,8 +53,15 @@ class MentalHealthInfodumpService {
         'Generate an informative infodump about $topic in the context of mental health, around 800-1000 words.';
 
     try {
-      final response = await _chatService.sendMessage(prompt, 'infodump_generator', true);
-      return response.isNotEmpty ? response : _getFallbackContent(topicKey);
+      final response = await APIService.generateInfodump(
+        userId: userId,
+        topic: topic,
+      );
+      
+      if (response != null && response['content'] != null) {
+        return response['content'];
+      }
+      return _getFallbackContent(topicKey);
     } catch (e) {
       return _getFallbackContent(topicKey);
     }
@@ -195,7 +199,7 @@ Quality sleep is not a luxury but a necessity for mental wellness.''',
   }
 
   // Get infodump content, generating if needed
-  static Future<String> getInfodumpContent(String topic) async {
+  static Future<String> getInfodumpContent(String topic, String userId) async {
     final topicKey = mentalHealthTopics[topic];
     if (topicKey == null) return 'Topic not found.';
 
@@ -210,7 +214,7 @@ Quality sleep is not a luxury but a necessity for mental wellness.''',
     }
 
     // Generate new content
-    final content = await _generateInfodumpContent(topic, topicKey);
+    final content = await _generateInfodumpContent(topic, topicKey, userId);
     
     // Save the content and mark as generated
     await prefs.setString('${_infodumpPrefix}${topicKey}', content);
@@ -229,7 +233,7 @@ Quality sleep is not a luxury but a necessity for mental wellness.''',
   }
 
   // Regenerate content (force refresh)
-  static Future<String> regenerateInfodumpContent(String topic) async {
+  static Future<String> regenerateInfodumpContent(String topic, String userId) async {
     final topicKey = mentalHealthTopics[topic];
     if (topicKey == null) return 'Topic not found.';
 
@@ -240,7 +244,7 @@ Quality sleep is not a luxury but a necessity for mental wellness.''',
     await prefs.remove('${_generatedFlagPrefix}${topicKey}');
     
     // Generate fresh content
-    return await getInfodumpContent(topic);
+    return await getInfodumpContent(topic, userId);
   }
 
   // Clear all stored infodumps

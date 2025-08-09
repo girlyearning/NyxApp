@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import '../services/word_service.dart';
+import '../services/api_service.dart';
 import 'dart:math';
 
 // Common Game Widget Base
@@ -9,7 +10,7 @@ abstract class BaseGameWidget extends StatefulWidget {
   const BaseGameWidget({super.key});
 }
 
-abstract class BaseGameState<T extends BaseGameWidget> extends State<T> {
+abstract class BaseGameState<T extends BaseGameWidget> extends State<T> with WidgetsBindingObserver {
   final TextEditingController answerController = TextEditingController();
   final ScrollController scrollController = ScrollController();
   final FocusNode focusNode = FocusNode();
@@ -17,39 +18,68 @@ abstract class BaseGameState<T extends BaseGameWidget> extends State<T> {
   int score = 0;
   String message = '';
   bool isLoading = true;
+  double _previousKeyboardHeight = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     setupKeyboardScrolling();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    answerController.dispose();
+    scrollController.dispose();
+    focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    final currentKeyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    
+    // If keyboard state changed
+    if (currentKeyboardHeight != _previousKeyboardHeight) {
+      _previousKeyboardHeight = currentKeyboardHeight;
+      
+      // Use a delay to ensure layout has updated
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          _scrollToShowInputArea();
+        }
+      });
+    }
   }
 
   void setupKeyboardScrolling() {
     focusNode.addListener(() {
       if (focusNode.hasFocus) {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (scrollController.hasClients && mounted) {
-            // For Unscramble: Scroll to show "Check Answer" button above keyboard
-            // Calculate scroll position to show the main action button properly
-            final targetOffset = scrollController.position.maxScrollExtent * 0.6; // Scroll to 60% to show Check Answer button
-            
-            scrollController.animateTo(
-              targetOffset.clamp(0.0, scrollController.position.maxScrollExtent),
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.easeInOut,
-            );
+        Future.delayed(const Duration(milliseconds: 300), () {
+          if (mounted) {
+            _scrollToShowInputArea();
           }
         });
       }
     });
   }
 
-  @override
-  void dispose() {
-    answerController.dispose();
-    scrollController.dispose();
-    focusNode.dispose();
-    super.dispose();
+  void _scrollToShowInputArea() {
+    if (!scrollController.hasClients) return;
+    
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    if (keyboardHeight > 0) {
+      // Calculate scroll position to show input area and action buttons above keyboard
+      final targetOffset = scrollController.position.maxScrollExtent * 0.7;
+      
+      scrollController.animateTo(
+        targetOffset.clamp(0.0, scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
   }
 
   Widget buildScoreContainer(BuildContext context) {
@@ -104,8 +134,8 @@ abstract class BaseGameState<T extends BaseGameWidget> extends State<T> {
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: onPressed == null ? Colors.grey : Theme.of(context).colorScheme.secondary,
-          foregroundColor: Colors.white,
+          backgroundColor: onPressed == null ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3) : Theme.of(context).colorScheme.secondary,
+          foregroundColor: onPressed == null ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5) : Theme.of(context).colorScheme.onSecondary,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -127,12 +157,12 @@ abstract class BaseGameState<T extends BaseGameWidget> extends State<T> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isCorrect 
-            ? Colors.green.withValues(alpha: 0.1) 
+            ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1) 
             : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: isCorrect 
-              ? Colors.green 
+              ? Theme.of(context).colorScheme.secondary 
               : Theme.of(context).colorScheme.primary,
         ),
       ),
@@ -140,7 +170,7 @@ abstract class BaseGameState<T extends BaseGameWidget> extends State<T> {
         message,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
           color: isCorrect 
-              ? Colors.green[700] 
+              ? Theme.of(context).colorScheme.secondary 
               : Theme.of(context).colorScheme.primary,
           fontWeight: FontWeight.w500,
         ),
@@ -160,12 +190,12 @@ abstract class BaseGameState<T extends BaseGameWidget> extends State<T> {
         left: 16.0,
         right: 16.0,
         top: 16.0,
-        bottom: bottomPadding > 0 ? bottomPadding + 80.0 : 16.0, // Optimized padding for keyboard
+        bottom: bottomPadding > 0 ? bottomPadding + 100.0 : 16.0, // More padding for keyboard
       ),
       child: Column(
         children: [
           ...children,
-          SizedBox(height: bottomPadding > 0 ? 120 : 50), // Optimized space at bottom
+          SizedBox(height: bottomPadding > 0 ? 150 : 50), // More space to show buttons above keyboard
         ],
       ),
     );
@@ -218,25 +248,66 @@ class _UnscrambleGameWidgetState extends BaseGameState<UnscrambleGameWidget> {
   }
 
   Future<void> _loadWordsAndStart() async {
-    _gameWords = await WordService.getWordsForGame('unscramble', count: 50);
+    // Pre-load words for better performance
+    if (_gameWords.isEmpty) {
+      _gameWords = await WordService.getWordsForGame('unscramble', count: 50);
+    }
     setState(() {
       isLoading = false;
     });
     _generateNewWord();
   }
 
-  void _generateNewWord() {
-    if (_gameWords.isEmpty) return;
-    
-    final random = Random();
-    _currentWord = _gameWords[random.nextInt(_gameWords.length)];
-    _scrambledWord = _scrambleWord(_currentWord);
+  void _generateNewWord() async {
+    // Don't show loading for subsequent words after the first load
+    final shouldShowLoading = _currentWord.isEmpty;
+    if (shouldShowLoading) {
+      setState(() {
+        isLoading = true;
+      });
+    }
+
+    try {
+      // Try API first, but don't wait too long
+      final response = await APIService.post('/games/unscramble/generate', {
+        'user_id': 'flutter_user',
+      }).timeout(const Duration(seconds: 3), onTimeout: () => {'success': false});
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        _currentWord = data['current_word'];
+        _scrambledWord = data['scrambled_word'];
+      } else {
+        // Fallback to local generation
+        await _generateWordLocally();
+      }
+    } catch (e) {
+      // Fallback to local generation if API fails or times out
+      await _generateWordLocally();
+    }
+
     answerController.clear();
     _isCorrect = false;
     message = '';
     _hintShown = false;
     _isRevealed = false;
-    setState(() {});
+    
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  Future<void> _generateWordLocally() async {
+    // Fallback local generation
+    if (_gameWords.isEmpty) {
+      _gameWords = await WordService.getWordsForGame('unscramble', count: 50);
+    }
+    
+    if (_gameWords.isEmpty) return;
+    
+    final random = Random();
+    _currentWord = _gameWords[random.nextInt(_gameWords.length)];
+    _scrambledWord = _scrambleWord(_currentWord);
   }
 
   String _scrambleWord(String word) {
@@ -265,6 +336,56 @@ class _UnscrambleGameWidgetState extends BaseGameState<UnscrambleGameWidget> {
     
     final answer = answerController.text.trim().toUpperCase();
     
+    // Show immediate feedback
+    setState(() {
+      message = 'Checking...';
+    });
+    
+    try {
+      // Use backend API for validation
+      final response = await APIService.post('/games/unscramble/validate', {
+        'user_id': 'flutter_user',
+        'answer': answer,
+        'current_word': _currentWord,
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        
+        if (data['isValid'] == true) {
+          _isCorrect = true;
+          _streak++;
+          final points = (data['points'] ?? 10) as int;
+          score = score + points;
+          message = data['message'] ?? 'Correct! +$points Nyx Notes';
+          
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
+          await userProvider.addNyxNotes(points);
+          
+          setState(() {});
+          
+          Future.delayed(const Duration(seconds: 1), () {
+            _generateNewWord();
+          });
+        } else {
+          _streak = 0;
+          message = data['message'] ?? 'Try again! The word starts with "${_currentWord[0]}"';
+          setState(() {});
+        }
+      } else {
+        // Fallback to local validation
+        _checkAnswerLocally(answer);
+      }
+    } catch (e) {
+      // Fallback to local validation if API fails
+      _checkAnswerLocally(answer);
+    }
+    
+    answerController.clear();
+  }
+
+  void _checkAnswerLocally(String answer) async {
+    // Original local validation logic
     if (answer == _currentWord) {
       _isCorrect = true;
       _streak++;
@@ -285,8 +406,6 @@ class _UnscrambleGameWidgetState extends BaseGameState<UnscrambleGameWidget> {
       message = 'Try again! The word starts with "${_currentWord[0]}"';
       setState(() {});
     }
-    
-    answerController.clear();
   }
   
   void _revealWord() {
@@ -323,7 +442,7 @@ class _UnscrambleGameWidgetState extends BaseGameState<UnscrambleGameWidget> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withValues(alpha: 0.1),
+                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                   spreadRadius: 2,
                   blurRadius: 4,
                 ),
@@ -374,7 +493,7 @@ class _UnscrambleGameWidgetState extends BaseGameState<UnscrambleGameWidget> {
                 child: Text(
                   'Get Hint',
                   style: TextStyle(
-                    color: _hintShown ? Colors.grey : Theme.of(context).colorScheme.secondary,
+                    color: _hintShown ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5) : Theme.of(context).colorScheme.secondary,
                   ),
                 ),
               ),
@@ -383,7 +502,7 @@ class _UnscrambleGameWidgetState extends BaseGameState<UnscrambleGameWidget> {
                 child: Text(
                   'Reveal Word',
                   style: TextStyle(
-                    color: (_isCorrect || _isRevealed) ? Colors.grey : Theme.of(context).colorScheme.secondary,
+                    color: (_isCorrect || _isRevealed) ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5) : Theme.of(context).colorScheme.secondary,
                   ),
                 ),
               ),
@@ -430,18 +549,21 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
   
   void _setupPrefixGameScrolling() {
     focusNode.addListener(() {
-      if (focusNode.hasFocus) {
-        Future.delayed(const Duration(milliseconds: 500), () {
+      if (focusNode.hasFocus && mounted) {
+        // Use WidgetsBinding to ensure layout is complete
+        WidgetsBinding.instance.addPostFrameCallback((_) {
           if (scrollController.hasClients && mounted) {
-            // For PrefixGame: Scroll to show "Submit Word" and "End Round" buttons above keyboard
-            final maxScroll = scrollController.position.maxScrollExtent;
-            final targetScroll = maxScroll * 0.75; // Scroll to 75% to show action buttons
-            
-            scrollController.animateTo(
-              targetScroll.clamp(0.0, maxScroll),
-              duration: const Duration(milliseconds: 400),
-              curve: Curves.easeInOut,
-            );
+            // Calculate exact position to show text field and buttons
+            final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+            if (keyboardHeight > 0) {
+              // Scroll to show both text field and Submit/End Round buttons above keyboard
+              final targetOffset = scrollController.position.maxScrollExtent * 0.8;
+              scrollController.animateTo(
+                targetOffset.clamp(0.0, scrollController.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
           }
         });
       }
@@ -457,17 +579,25 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
       isLoading = true;
     });
 
-    // Get prefixes from common words
-    if (_availablePrefixes.isEmpty) {
-      _availablePrefixes = await WordService.getCommonPrefixes();
+    try {
+      // Call backend API with timeout for faster fallback
+      final response = await APIService.post('/games/prefixgame/generate', {
+        'user_id': 'flutter_user',
+      }).timeout(const Duration(seconds: 3), onTimeout: () => {'success': false});
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        _currentPrefix = data['current_prefix'];
+        _validWords = List<String>.from(data['valid_words'] ?? []);
+      } else {
+        // Fallback to local generation
+        await _generatePrefixLocally();
+      }
+    } catch (e) {
+      // Fallback to local generation if API fails
+      await _generatePrefixLocally();
     }
-    
-    final random = Random();
-    _currentPrefix = _availablePrefixes[random.nextInt(_availablePrefixes.length)];
-    
-    // Get valid words for this prefix using WordService (from words_alpha.txt)
-    _validWords = await WordService.getPrefixWords(_currentPrefix);
-    
+
     _foundWords.clear();
     answerController.clear();
     message = '';
@@ -477,6 +607,19 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
     
     setState(() {});
     _startTimer();
+  }
+
+  Future<void> _generatePrefixLocally() async {
+    // Fallback local generation
+    if (_availablePrefixes.isEmpty) {
+      _availablePrefixes = await WordService.getCommonPrefixes();
+    }
+    
+    final random = Random();
+    _currentPrefix = _availablePrefixes[random.nextInt(_availablePrefixes.length)];
+    
+    // Get valid words for this prefix using WordService (from words_alpha.txt)
+    _validWords = await WordService.getPrefixWords(_currentPrefix);
   }
 
   void _startTimer() {
@@ -518,6 +661,44 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
     
     if (answer.isEmpty) return;
     
+    try {
+      // Use backend API for validation
+      final response = await APIService.post('/games/prefixgame/validate', {
+        'user_id': 'flutter_user',
+        'answer': answer,
+        'current_prefix': _currentPrefix,
+        'found_words': _foundWords,
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        
+        if (data['isValid'] == true) {
+          _foundWords.add(answer);
+          final points = (data['points'] ?? 10) as int;
+          score = score + points;
+          message = data['message'] ?? 'Correct! "$answer" +$points Nyx Notes';
+          
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
+          await userProvider.addNyxNotes(points);
+        } else {
+          message = data['message'] ?? 'Not a valid word';
+        }
+      } else {
+        // Fallback to local validation
+        await _checkAnswerLocally(answer);
+      }
+    } catch (e) {
+      // Fallback to local validation if API fails
+      await _checkAnswerLocally(answer);
+    }
+    
+    answerController.clear();
+    setState(() {});
+  }
+
+  Future<void> _checkAnswerLocally(String answer) async {
+    // Original local validation logic
     if (_foundWords.contains(answer)) {
       message = 'You already found that word!';
     } else if (!answer.startsWith(_currentPrefix)) {
@@ -538,9 +719,6 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
         message = 'Not a valid English word';
       }
     }
-    
-    answerController.clear();
-    setState(() {});
   }
 
   @override
@@ -598,7 +776,7 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
                     Text(
                       'Time: $_timeLeft',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: _timeLeft <= 10 ? Colors.red : null,
+                        color: _timeLeft <= 10 ? Theme.of(context).colorScheme.error : null,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -616,10 +794,10 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
           const SizedBox(height: 24),
           
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: Theme.of(context).colorScheme.primary,
                 width: 2,
@@ -629,12 +807,12 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
               children: [
                 Text(
                   'Find words starting with:',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: Theme.of(context).textTheme.titleSmall,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 8),
                 Text(
                   _currentPrefix,
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: Theme.of(context).colorScheme.primary,
                   ),
@@ -672,7 +850,7 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
                     onPressed: _checkAnswer,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.secondary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: Theme.of(context).colorScheme.onSecondary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -690,7 +868,7 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
                     onPressed: _endRoundEarly,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: Theme.of(context).colorScheme.onSecondary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -711,7 +889,7 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
                 onPressed: () => _startNewRound(),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.secondary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -759,8 +937,8 @@ class _PrefixGameWidgetState extends BaseGameState<PrefixGameWidget> {
               runSpacing: 8,
               children: _foundWords.map((word) => Chip(
                 label: Text(word),
-                backgroundColor: Colors.green.withValues(alpha: 0.1),
-                side: BorderSide(color: Colors.green),
+                backgroundColor: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1),
+                side: BorderSide(color: Theme.of(context).colorScheme.secondary),
               )).toList(),
             ),
           ],
@@ -826,7 +1004,67 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
       isLoading = true;
     });
 
-    // Update grid size based on mode
+    try {
+      // Call backend API to generate Word Hunt puzzle
+      final difficulty = _isEasyMode ? 'easy' : 'hard';
+      final response = await APIService.post('/games/wordhunt/generate', {
+        'difficulty': difficulty,
+        'user_id': 'flutter_user',
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        
+        // Update game state with backend data
+        _gridSize = data['grid_size'];
+        _grid = List<List<String>>.from(
+          data['grid'].map((row) => List<String>.from(row))
+        );
+        _hiddenWords = List<String>.from(data['target_words']);
+        
+        // Parse word positions and placed words
+        _wordPositions.clear();
+        _placedWords.clear();
+        
+        if (data['word_positions'] != null) {
+          data['word_positions'].forEach((word, positions) {
+            _wordPositions[word] = List<List<int>>.from(
+              positions.map((pos) => List<int>.from(pos))
+            );
+          });
+        }
+        
+        if (data['placed_words'] != null) {
+          data['placed_words'].forEach((word, placedWord) {
+            _placedWords[word] = placedWord;
+          });
+        }
+        
+        // Reset game state
+        _foundWords.clear();
+        _selectedCells.clear();
+        _correctCells.clear();
+        score = 0;
+        _showWordList = false;
+        _hintsUsed = 0;
+        _hintedWords.clear();
+        message = data['message'] ?? (_isEasyMode ? 'Easy Mode: Find 4 words (4-6 letters)' : 'Hard Mode: Find 4 words (5-9 letters)');
+      } else {
+        // Fallback to local generation if API fails
+        await _generatePuzzleLocally();
+      }
+    } catch (e) {
+      // Fallback to local generation if API fails
+      await _generatePuzzleLocally();
+    }
+    
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  Future<void> _generatePuzzleLocally() async {
+    // Fallback local generation (original logic)
     _gridSize = _isEasyMode ? 6 : 10;
     _grid = List.generate(_gridSize, (_) => List.generate(_gridSize, (_) => ''));
     _hiddenWords.clear();
@@ -841,7 +1079,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
     _hintedWords.clear();
     message = _isEasyMode ? 'Easy Mode: Find 4 words (4-6 letters)' : 'Hard Mode: Find 4 words (5-9 letters)';
     
-    // Get words based on difficulty
+    // Get words based on difficulty with better random selection
     final minLength = _isEasyMode ? 4 : 5;
     final maxLength = _isEasyMode ? 6 : 9;
     final words = await WordService.getWordHuntWords(
@@ -850,7 +1088,10 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
       maxLength: maxLength,
     );
     
-    _hiddenWords = words;
+    // Ensure different words by shuffling and taking unique ones
+    final allWords = words.toSet().toList(); // Remove duplicates
+    allWords.shuffle(Random()); // Shuffle for randomness
+    _hiddenWords = allWords.take(4).toList();
     
     // Place words in grid with various orientations
     final random = Random();
@@ -869,18 +1110,17 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
       }
     }
     
-    // Fill empty cells with random letters
+    // Fill empty cells with random letters (more varied)
+    final random2 = Random(DateTime.now().millisecondsSinceEpoch);
     for (int i = 0; i < _gridSize; i++) {
       for (int j = 0; j < _gridSize; j++) {
         if (_grid[i][j].isEmpty) {
-          _grid[i][j] = String.fromCharCode(65 + random.nextInt(26));
+          // Use more common letters for better gameplay
+          const commonLetters = 'AEIOURSTLNMDBCFGHKPQVWXYZ';
+          _grid[i][j] = commonLetters[random2.nextInt(commonLetters.length)];
         }
       }
     }
-    
-    setState(() {
-      isLoading = false;
-    });
   }
 
   bool _tryPlaceWord(String word, int direction, bool backwards) {
@@ -970,7 +1210,54 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
       return;
     }
     
-    // Check if the input matches any original word or placed word (reversed)
+    try {
+      // Use backend API for validation
+      final response = await APIService.post('/games/wordhunt/validate', {
+        'user_id': 'flutter_user',
+        'word': word,
+        'target_words': _hiddenWords,
+        'placed_words': _placedWords,
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        
+        if (data['isValid'] == true) {
+          final matchedWord = data['matched_word'];
+          _foundWords.add(matchedWord);
+          final points = 10;  // Fixed 10 points per word
+          score = score + points.toInt();
+          message = data['message'] ?? 'Found "$matchedWord"! +$points Nyx Notes';
+          
+          // Highlight the word in the grid
+          if (_wordPositions.containsKey(matchedWord)) {
+            _correctCells.addAll(_wordPositions[matchedWord]!);
+          }
+          
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
+          await userProvider.addNyxNotes(points);
+          
+          if (_foundWords.length == _hiddenWords.length) {
+            message = 'Puzzle complete! Bonus +50 Nyx Notes!';
+            await userProvider.addNyxNotes(50);
+          }
+        } else {
+          message = data['message'] ?? '"$word" is not a hidden word';
+        }
+      } else {
+        // Fallback to local validation
+        await _checkWordLocalFallback(word);
+      }
+    } catch (e) {
+      // Fallback to local validation if API fails
+      await _checkWordLocalFallback(word);
+    }
+    
+    setState(() {});
+  }
+
+  Future<void> _checkWordLocalFallback(String word) async {
+    // Original local validation logic
     String? matchedOriginalWord;
     if (_hiddenWords.contains(word)) {
       matchedOriginalWord = word;
@@ -1005,8 +1292,6 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
     } else {
       message = '"$word" is not a hidden word';
     }
-    
-    setState(() {});
   }
 
   void _onCellTap(int row, int col) {
@@ -1164,7 +1449,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
           if (pathMatches) {
             _foundWords.add(word);
             final points = 10;
-            score += points;
+            score = score + points.toInt();
             message = 'Found "$word"! +$points Nyx Notes';
             
             // Add to correct cells and clear selection
@@ -1234,7 +1519,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
         if (allSelected) {
           _foundWords.add(word);
           final points = 10;  // Fixed 10 points per word
-          score += points;
+          score = score + points.toInt();
           message = 'Found "$word"! +$points Nyx Notes';
           
           // Add to correct cells and clear selection
@@ -1344,7 +1629,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                 onPressed: () => _generateNewPuzzle(),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.secondary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondary,
                 ),
                 child: const Text('New Game'),
               ),
@@ -1384,7 +1669,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                     child: Text(
                       message,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.green[700],
+                        color: Theme.of(context).colorScheme.secondary,
                         fontWeight: FontWeight.w500,
                       ),
                       textAlign: TextAlign.center,
@@ -1447,16 +1732,16 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                               margin: const EdgeInsets.all(2),
                               decoration: BoxDecoration(
                                 color: isCorrect
-                                    ? Colors.green.withValues(alpha: 0.3)
+                                    ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.3)
                                     : (isSelected || isInSwipePath)
-                                        ? Colors.blue.withValues(alpha: 0.3)
+                                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
                                         : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
                                   color: isCorrect
-                                      ? Colors.green
+                                      ? Theme.of(context).colorScheme.secondary
                                       : (isSelected || isInSwipePath)
-                                          ? Colors.blue
+                                          ? Theme.of(context).colorScheme.primary
                                           : Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
                                   width: (isCorrect || isSelected || isInSwipePath) ? 2 : 1,
                                 ),
@@ -1467,7 +1752,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                                   style: TextStyle(
                                     fontSize: _isEasyMode ? 16 : 12,
                                     fontWeight: FontWeight.bold,
-                                    color: (isCorrect || isSelected || isInSwipePath) ? Colors.black : null,
+                                    color: (isCorrect || isSelected || isInSwipePath) ? Theme.of(context).colorScheme.onSurface : null,
                                   ),
                                 ),
                               ),
@@ -1513,6 +1798,10 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                   _checkWordFromText(_wordInputController.text);
                   _wordInputController.clear();
                 },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.secondary,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondary,
+                ),
                 child: const Text('Check'),
               ),
             ],
@@ -1554,8 +1843,8 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
               runSpacing: 8,
               children: _foundWords.map((word) => Chip(
                 label: Text(word),
-                backgroundColor: Colors.green.withValues(alpha: 0.1),
-                side: const BorderSide(color: Colors.green),
+                backgroundColor: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1),
+                side: BorderSide(color: Theme.of(context).colorScheme.secondary),
               )).toList(),
             ),
           ],
@@ -1577,7 +1866,7 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                   style: TextStyle(
                     color: (_hintsUsed < _maxHints && _foundWords.length < _hiddenWords.length)
                         ? Theme.of(context).colorScheme.secondary
-                        : Colors.grey,
+                        : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                   ),
                 ),
               ),
@@ -1623,10 +1912,10 @@ class _WordHuntGameWidgetState extends BaseGameState<WordHuntGameWidget> {
                       return Chip(
                         label: Text(isReversed ? '$word (as $placedWord)' : word),
                         backgroundColor: isFound
-                            ? Colors.green.withValues(alpha: 0.1)
-                            : Colors.grey.withValues(alpha: 0.1),
+                            ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1)
+                            : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
                         side: BorderSide(
-                          color: isFound ? Colors.green : Colors.grey,
+                          color: isFound ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                         ),
                       );
                     }).toList(),
@@ -1680,16 +1969,22 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
     super.initState();
     _loadSequenceAndStart();
     
-    // Auto-scroll when keyboard appears
+    // Auto-scroll when keyboard appears to show both text field and buttons
     focusNode.addListener(() {
       if (focusNode.hasFocus) {
         Future.delayed(const Duration(milliseconds: 300), () {
-          if (scrollController.hasClients) {
-            scrollController.animateTo(
-              scrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
+          if (scrollController.hasClients && mounted) {
+            // Get keyboard height to calculate proper scroll
+            final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+            if (keyboardHeight > 0) {
+              // Scroll to show both text field and Submit/End Round buttons above keyboard
+              final targetOffset = scrollController.position.maxScrollExtent * 0.8;
+              scrollController.animateTo(
+                targetOffset.clamp(0.0, scrollController.position.maxScrollExtent),
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
           }
         });
       }
@@ -1705,7 +2000,37 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
       isLoading = true;
     });
 
-    // Common letter sequences that appear in many words
+    try {
+      // Call backend API to generate letter sequence challenge
+      final response = await APIService.post('/games/lettersequence/generate', {
+        'user_id': 'flutter_user',
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        _currentSequence = data['current_sequence'];
+      } else {
+        // Fallback to local generation
+        _generateSequenceLocally();
+      }
+    } catch (e) {
+      // Fallback to local generation if API fails
+      _generateSequenceLocally();
+    }
+
+    _foundWords.clear();
+    answerController.clear();
+    message = '';
+    _timeLeft = 60;
+    _gameActive = true;
+    isLoading = false;
+    
+    setState(() {});
+    _startTimer();
+  }
+
+  void _generateSequenceLocally() {
+    // Fallback local generation
     _availableSequences = [
       'MIC', 'CAR', 'PRO', 'TER', 'CON', 'MAN', 'LIG', 'STR', 'PEN', 'TAR',
       'BAN', 'CAN', 'DEN', 'FAN', 'GEN', 'HEN', 'LEN', 'MEN', 'PAN', 'RAN',
@@ -1717,16 +2042,6 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
     
     final random = Random();
     _currentSequence = _availableSequences[random.nextInt(_availableSequences.length)];
-    
-    _foundWords.clear();
-    answerController.clear();
-    message = '';
-    _timeLeft = 60;
-    _gameActive = true;
-    isLoading = false;
-    
-    setState(() {});
-    _startTimer();
   }
 
   void _startTimer() {
@@ -1765,6 +2080,44 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
     
     if (answer.isEmpty) return;
     
+    try {
+      // Use backend API for validation
+      final response = await APIService.post('/games/lettersequence/validate', {
+        'user_id': 'flutter_user',
+        'answer': answer,
+        'current_sequence': _currentSequence,
+        'found_words': _foundWords,
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        
+        if (data['isValid'] == true) {
+          _foundWords.add(answer);
+          final points = (data['points'] ?? 10) as int;
+          score = score + points;
+          message = data['message'] ?? 'Correct! "$answer" +$points Nyx Notes';
+          
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
+          await userProvider.addNyxNotes(points);
+        } else {
+          message = data['message'] ?? 'Not a valid word';
+        }
+      } else {
+        // Fallback to local validation
+        await _checkAnswerLocally(answer);
+      }
+    } catch (e) {
+      // Fallback to local validation if API fails
+      await _checkAnswerLocally(answer);
+    }
+    
+    answerController.clear();
+    setState(() {});
+  }
+
+  Future<void> _checkAnswerLocally(String answer) async {
+    // Original local validation logic
     if (_foundWords.contains(answer)) {
       message = 'You already found that word!';
     } else if (!answer.contains(_currentSequence)) {
@@ -1779,7 +2132,7 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
         if (isValid) {
           _foundWords.add(answer);
           final points = 10;  // Fixed 10 points per word
-          score += points;
+          score = score + points.toInt();
           message = 'Correct! "$answer" +$points Nyx Notes';
           
           final userProvider = Provider.of<UserProvider>(context, listen: false);
@@ -1791,9 +2144,6 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
         message = 'Word must contain "$_currentSequence" in that exact order!';
       }
     }
-    
-    answerController.clear();
-    setState(() {});
   }
 
   @override
@@ -1812,8 +2162,16 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
     }
 
     return SingleChildScrollView(
+      controller: scrollController,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.all(16.0),
+      padding: EdgeInsets.only(
+        left: 16.0,
+        right: 16.0,
+        top: 16.0,
+        bottom: MediaQuery.of(context).viewInsets.bottom > 0 
+            ? MediaQuery.of(context).viewInsets.bottom + 80.0 
+            : 16.0,
+      ),
       child: Column(
         children: [
           Container(
@@ -1837,7 +2195,7 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
                     Text(
                       'Time: $_timeLeft',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: _timeLeft <= 10 ? Colors.red : null,
+                        color: _timeLeft <= 10 ? Theme.of(context).colorScheme.error : null,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -1855,10 +2213,10 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
           const SizedBox(height: 24),
           
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: Theme.of(context).colorScheme.primary,
                 width: 2,
@@ -1868,22 +2226,22 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
               children: [
                 Text(
                   'Find words containing:',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _currentSequence,
-                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.primary,
-                    letterSpacing: 4,
-                  ),
+                  style: Theme.of(context).textTheme.titleSmall,
                 ),
                 const SizedBox(height: 8),
                 Text(
+                  _currentSequence,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                    letterSpacing: 3,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
                   'Letters must appear in this exact order',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -1921,7 +2279,7 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
                     onPressed: _checkAnswer,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.secondary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: Theme.of(context).colorScheme.onSecondary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1939,7 +2297,7 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
                     onPressed: _endRoundEarly,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: Theme.of(context).colorScheme.onSecondary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
@@ -1960,7 +2318,7 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
                 onPressed: () => _startNewRound(),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.secondary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onSecondary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1982,12 +2340,12 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: message.contains('Correct') 
-                    ? Colors.green.withValues(alpha: 0.1)
+                    ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1)
                     : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: message.contains('Correct')
-                      ? Colors.green
+                      ? Theme.of(context).colorScheme.secondary
                       : Theme.of(context).colorScheme.primary,
                 ),
               ),
@@ -1996,7 +2354,7 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w500,
                   color: message.contains('Correct')
-                      ? Colors.green[700]
+                      ? Theme.of(context).colorScheme.secondary
                       : null,
                 ),
                 textAlign: TextAlign.center,
@@ -2018,8 +2376,8 @@ class _LetterSequenceGameWidgetState extends BaseGameState<LetterSequenceGameWid
               runSpacing: 8,
               children: _foundWords.map((word) => Chip(
                 label: Text(word),
-                backgroundColor: Colors.green.withValues(alpha: 0.1),
-                side: BorderSide(color: Colors.green),
+                backgroundColor: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1),
+                side: BorderSide(color: Theme.of(context).colorScheme.secondary),
               )).toList(),
             ),
           ],

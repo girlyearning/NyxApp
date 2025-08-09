@@ -11,11 +11,11 @@ class PersonalityColors {
         return const Color(0xFF9370DB); // Purple - mysterious and analytical
       case 'debate_master':
         return const Color(0xFFFF6347); // Orange/Red - fiery and challenging
-      case 'adhd':
+      case 'adhd_nyx':
         return const Color(0xFF00BCD4); // Cyan - energetic and dynamic
-      case 'autistic':
+      case 'autistic_nyx':
         return const Color(0xFF4CAF50); // Green - structured and clear
-      case 'audhd':
+      case 'autistic_adhd':
         return const Color(0xFF009688); // Teal - balanced blend
       default:
         return const Color(0xFFADCF86); // Default green
@@ -32,11 +32,11 @@ class PersonalityColors {
         return const Color(0xFF6B46C1); // Darker purple
       case 'debate_master':
         return const Color(0xFFFF4500); // Darker orange
-      case 'adhd':
+      case 'adhd_nyx':
         return const Color(0xFF0097A7); // Darker cyan
-      case 'autistic':
+      case 'autistic_nyx':
         return const Color(0xFF388E3C); // Darker green
-      case 'audhd':
+      case 'autistic_adhd':
         return const Color(0xFF00796B); // Darker teal
       default:
         return const Color(0xFF8BB96E); // Default darker green
@@ -53,11 +53,11 @@ class PersonalityColors {
         return 'Dream Analyst Nyx';
       case 'debate_master':
         return 'Debate Master Nyx';
-      case 'adhd':
+      case 'adhd_nyx':
         return 'ADHD Nyx';
-      case 'autistic':
+      case 'autistic_nyx':
         return 'Autistic Nyx';
-      case 'audhd':
+      case 'autistic_adhd':
         return 'AuDHD Nyx';
       default:
         return 'Nyx';

@@ -358,8 +358,6 @@ class _SupportSessionsScreenState extends State<SupportSessionsScreen> {
         return Icons.psychology;
       case 'rage_room':
         return Icons.sports_mma;
-      case 'mental_space':
-        return Icons.spa;
       case 'confession_booth':
         return Icons.lock_open;
       default:
@@ -395,8 +393,6 @@ class _SupportSessionsScreenState extends State<SupportSessionsScreen> {
         return Colors.deepPurple[600]!;
       case 'rage_room':
         return Colors.red[800]!;
-      case 'mental_space':
-        return Colors.lightGreen[600]!;
       case 'confession_booth':
         return Colors.blueGrey[600]!;
       default:

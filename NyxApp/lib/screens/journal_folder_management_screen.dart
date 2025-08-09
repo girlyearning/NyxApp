@@ -46,7 +46,7 @@ class _JournalFolderManagementScreenState extends State<JournalFolderManagementS
             border: OutlineInputBorder(),
           ),
           maxLength: 50,
-          autofocus: true,
+          autofocus: false,
         ),
         actions: [
           TextButton(

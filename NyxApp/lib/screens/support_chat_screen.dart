@@ -4,8 +4,6 @@ import '../models/chat_message.dart';
 import '../services/support_chat_service.dart';
 import '../widgets/chat_bubble.dart';
 import '../providers/user_provider.dart';
-import '../widgets/optimized_chat_input.dart';
-import '../screens/report_content_screen.dart';
 
 class SupportChatScreen extends StatefulWidget {
   final String sessionId;
@@ -23,25 +21,52 @@ class SupportChatScreen extends StatefulWidget {
   State<SupportChatScreen> createState() => _SupportChatScreenState();
 }
 
-class _SupportChatScreenState extends State<SupportChatScreen> {
+class _SupportChatScreenState extends State<SupportChatScreen> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<ChatMessage> _messages = [];
   bool _isLoading = false;
   int _messagesBeingAdded = 0;
+  double _previousKeyboardHeight = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSession();
   }
 
   @override
   void dispose() {
+    // Dismiss keyboard when leaving screen
+    FocusScope.of(context).unfocus();
     _createMemoryIfNeeded();
+    WidgetsBinding.instance.removeObserver(this);
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    final currentKeyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    
+    // If keyboard state changed, scroll to bottom with optimized timing
+    if (currentKeyboardHeight != _previousKeyboardHeight) {
+      _previousKeyboardHeight = currentKeyboardHeight;
+      
+      // Reduce delay and optimize for smoother transitions
+      if (currentKeyboardHeight > 0) {
+        // Keyboard is opening
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (mounted) _scrollToBottom();
+        });
+      } else {
+        // Keyboard is closing - immediate scroll
+        if (mounted) _scrollToBottom();
+      }
+    }
   }
   
   Future<void> _handleReaction(String messageId, String reaction) async {
@@ -62,10 +87,13 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
           _messagesBeingAdded++;
         });
 
+        if (!mounted) return;
+        final userProvider = Provider.of<UserProvider>(context, listen: false);
         final response = await SupportChatService.sendThumbsDownResponse(
           reactedMessage.content,
           widget.supportType,
           widget.sessionId,
+          userId: userProvider.currentUserId,
         );
 
         if (mounted) {
@@ -163,8 +191,6 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
         return "Ah, confronting the big questions, are we? Welcome to the human condition - it's messy, absurd, and somehow beautiful.";
       case 'rage_room':
         return "Oh, we're feeling some rage today? Fucking finally. Let's get this out properly instead of letting it eat you alive.";
-      case 'mental_space':
-        return "Time to build some actual mental resilience. Not the Instagram kind - the kind that actually works when life hits hard.";
       case 'confession_booth':
         return "Anonymous confessions, huh? I've heard everything, so don't hold back. What's weighing on you?";
       default:
@@ -256,12 +282,16 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
   }
 
   void _scrollToBottom() {
-    if (!_scrollController.hasClients) return;
+    if (!_scrollController.hasClients || !mounted) return;
     
-    // Use jumpTo for immediate scroll without animation to reduce lag
+    // Use animateTo with shorter duration for smoother experience
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      if (_scrollController.hasClients && mounted) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+        );
       }
     });
   }
@@ -442,6 +472,7 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Text(
           widget.title,
@@ -492,123 +523,157 @@ class _SupportChatScreenState extends State<SupportChatScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Messages list
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              physics: const AlwaysScrollableScrollPhysics(),
-              addAutomaticKeepAlives: false,
-              addRepaintBoundaries: false,
-              cacheExtent: 200.0,
-              itemBuilder: (context, index) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: ChatBubble(
-                    key: ValueKey(_messages[index].id),
-                    message: _messages[index],
-                    isLoading: false,
-                    onReaction: (reaction) => _handleReaction(_messages[index].id, reaction),
-                  ),
-                );
-              },
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Messages list
+            Expanded(
+              child: GestureDetector(
+                onTap: () => FocusScope.of(context).unfocus(),
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _messages.length,
+                  reverse: false,
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  addAutomaticKeepAlives: false,
+                  addRepaintBoundaries: false,
+                  cacheExtent: 200.0,
+                  itemBuilder: (context, index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: ChatBubble(
+                        key: ValueKey(_messages[index].id),
+                        message: _messages[index],
+                        isLoading: false,
+                        onReaction: (reaction) => _handleReaction(_messages[index].id, reaction),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ),
-          ),
 
-          // Loading indicator
-          if (_isLoading || _messagesBeingAdded > 0)
-            Padding(
-              padding: const EdgeInsets.all(16),
+            // Loading indicator
+            if (_isLoading || _messagesBeingAdded > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    const CircularProgressIndicator(strokeWidth: 2),
+                    const SizedBox(width: 16),
+                    Text(_getLoadingText()),
+                    if (_messagesBeingAdded > 0)
+                      Text(' ($_messagesBeingAdded more messages coming...)'),
+                  ],
+                ),
+              ),
+
+            // Message input
+            Container(
+              padding: EdgeInsets.only(
+                left: 8,
+                right: 8,
+                top: 8,
+                bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : 0,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    offset: const Offset(0, -2),
+                    blurRadius: 4,
+                  ),
+                ],
+              ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(width: 16),
-                  Text(_getLoadingText()),
-                  if (_messagesBeingAdded > 0)
-                    Text(' ($_messagesBeingAdded more messages coming...)'),
+                  Expanded(
+                    child: Container(
+                      constraints: const BoxConstraints(
+                        minHeight: 56,
+                        maxHeight: 160,
+                      ),
+                      child: Scrollbar(
+                        child: TextField(
+                          controller: _messageController,
+                          decoration: InputDecoration(
+                            hintText: 'Type your message...',
+                            hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(28),
+                              borderSide: BorderSide(
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(28),
+                              borderSide: BorderSide(
+                                color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(28),
+                              borderSide: BorderSide(
+                                color: Theme.of(context).colorScheme.primary,
+                                width: 2,
+                              ),
+                            ),
+                            filled: true,
+                            fillColor: Theme.of(context).colorScheme.surface,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 14,
+                            ),
+                          ),
+                          style: Theme.of(context).textTheme.bodyMedium,
+                          textCapitalization: TextCapitalization.sentences,
+                          keyboardType: TextInputType.multiline,
+                          minLines: 1,
+                          maxLines: null,
+                          scrollPhysics: const BouncingScrollPhysics(),
+                          textInputAction: TextInputAction.newline,
+                          onSubmitted: (_) => _sendMessage(),
+                          onTap: () {
+                            // Scroll to bottom when keyboard opens
+                            Future.delayed(const Duration(milliseconds: 300), () {
+                              _scrollToBottom();
+                            });
+                          },
+                          enabled: !_isLoading && _messagesBeingAdded == 0,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.secondary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.send, color: Colors.white),
+                      onPressed: (_isLoading || _messagesBeingAdded > 0) ? null : _sendMessage,
+                    ),
+                  ),
                 ],
               ),
             ),
-
-          // Message input
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                top: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
-              ),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: 'Type your message...',
-                      hintStyle: Theme.of(context).textTheme.bodyMedium,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(28),
-                        borderSide: BorderSide(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(28),
-                        borderSide: BorderSide(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(28),
-                        borderSide: BorderSide(color: Theme.of(context).colorScheme.primary, width: 1.5),
-                      ),
-                      filled: true,
-                      fillColor: Theme.of(context).colorScheme.surface,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 8,
-                      ),
-                    ),
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    textCapitalization: TextCapitalization.sentences,
-                    minLines: 1,
-                    maxLines: 3,
-                    onSubmitted: (_) => _sendMessage(),
-                    onTap: () {
-                      // Removed delay to reduce lag
-                      _scrollToBottom();
-                    },
-                    enabled: !_isLoading && _messagesBeingAdded == 0,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.secondary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.white),
-                    onPressed: (_isLoading || _messagesBeingAdded > 0) ? null : _sendMessage,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showReportDialog() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ReportContentScreen(
-          chatType: 'Support Chat - ${widget.title}',
-          sessionId: widget.sessionId,
-          chatHistory: _messages,
+          ],
         ),
       ),
     );
   }
+
 }

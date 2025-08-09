@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math';
 import '../services/qyknotes_service.dart';
 import '../services/achievement_service.dart';
 import '../services/profile_service.dart';
@@ -21,7 +22,13 @@ class UserProvider extends ChangeNotifier {
 
   int get nyxNotes => _nyxNotes;
   String get userName => _userName;
-  String get currentUserId => _userId.isEmpty ? 'flutter_user' : _userId;
+  String get currentUserId {
+    if (_userId.isEmpty) {
+      _userId = _generateUniqueUserId();
+      _saveUserData();
+    }
+    return _userId;
+  }
   int? get chatSessions => _chatSessions;
   int? get journalEntries => _journalEntries;
   int? get gamesPlayed => _gamesPlayed;
@@ -147,5 +154,14 @@ class UserProvider extends ChangeNotifier {
     await _loadUserData();
     await refreshQykNotesCount();
     notifyListeners();
+  }
+
+  /// Generates a unique user ID using timestamp and random components
+  String _generateUniqueUserId() {
+    final now = DateTime.now();
+    final random = Random();
+    final timestamp = now.millisecondsSinceEpoch;
+    final randomPart = random.nextInt(999999).toString().padLeft(6, '0');
+    return 'user_${timestamp}_$randomPart';
   }
 }

@@ -6,9 +6,24 @@ import '../screens/infodump_screen.dart';
 import '../screens/nyx_queries_screen.dart';
 import '../screens/nautical_nyx_screen.dart';
 import '../screens/kitty_katch_screen.dart';
+import '../screens/botanical_breaker_screen.dart';
 
-class SensorySelfcareScreen extends StatelessWidget {
+class SensorySelfcareScreen extends StatefulWidget {
   const SensorySelfcareScreen({super.key});
+
+  @override
+  State<SensorySelfcareScreen> createState() => _SensorySelfcareScreenState();
+}
+
+class _SensorySelfcareScreenState extends State<SensorySelfcareScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Dismiss keyboard when entering this screen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusScope.of(context).unfocus();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -85,6 +100,9 @@ class SensorySelfcareScreen extends StatelessWidget {
             _buildKittyKatchCard(context),
             const SizedBox(height: 24),
 
+            // Botanical Breaker Game
+            _buildBotanicalBreakerCard(context),
+            const SizedBox(height: 24),
 
             // Prescription Puzzles
             SectionCard(
@@ -311,6 +329,72 @@ class SensorySelfcareScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildBotanicalBreakerCard(BuildContext context) {
+    return Card(
+      elevation: 3,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: const Color(0xFFB39DDB), // Purple/lavender color for botanical theme
+          width: 1,
+        ),
+      ),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const BotanicalBreakerScreen()),
+          );
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFB39DDB).withValues(alpha: 0.2), // Purple with transparency
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.local_florist,
+                  color: Color(0xFF7E57C2), // Darker purple
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Botanical Breaker',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Launch rose balls to break hedges and watch leaves fall!',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios,
+                color: Colors.grey[400],
+                size: 16,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _navigateToGame(BuildContext context, String gameType) {
     Navigator.push(

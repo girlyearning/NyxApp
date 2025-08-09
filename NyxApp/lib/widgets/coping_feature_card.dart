@@ -128,8 +128,6 @@ class CopingFeatureCard extends StatelessWidget {
         return 'existential_exploration';
       case 'rage_room':
         return 'rage_room';
-      case 'mental_space':
-        return 'mental_space';
       case 'confession':
         return 'confession_booth';
       default:

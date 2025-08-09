@@ -3,8 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import '../widgets/game_widgets.dart';
 import 'dart:math';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../services/api_service.dart';
 
 class GamesScreen extends StatefulWidget {
   final String gameType;
@@ -59,7 +58,11 @@ class _GamesScreenState extends State<GamesScreen> {
       default:
         _gameTitle = 'Game';
         _gameDescription = 'Game description';
-        _gameWidget = const ComingSoonWidget();
+        _gameWidget = const GamePlaceholder(
+          title: 'Coming Soon',
+          description: 'This game is still in development!',
+          icon: Icons.construction,
+        );
     }
   }
 
@@ -128,45 +131,7 @@ class _GamesScreenState extends State<GamesScreen> {
   }
 }
 
-// Placeholder game widgets - will be implemented with actual game logic
-class WordHuntGame extends StatelessWidget {
-  const WordHuntGame({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const GamePlaceholder(
-      title: 'Word Hunt',
-      description: 'Letter grid and word finding interface coming soon!',
-      icon: Icons.search,
-    );
-  }
-}
-
-class UnscrambleGame extends StatelessWidget {
-  const UnscrambleGame({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const GamePlaceholder(
-      title: 'Unscramble',
-      description: 'Word unscrambling interface coming soon!',
-      icon: Icons.shuffle,
-    );
-  }
-}
-
-class PrefixGame extends StatelessWidget {
-  const PrefixGame({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const GamePlaceholder(
-      title: 'Prefix Game',
-      description: 'Prefix word challenge interface coming soon!',
-      icon: Icons.text_fields,
-    );
-  }
-}
+// All game widgets are now properly implemented in game_widgets.dart
 
 
 class ScattergoriesGame extends StatefulWidget {
@@ -259,17 +224,26 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
     super.dispose();
   }
 
-  void _generateNewRound() {
-    final random = Random();
-    
-    // Generate random letter (avoiding difficult letters)
-    const letters = 'ABCDEFGHIJKLMNOPRSTUVWY'; // Removed Q, X, Z for better gameplay
-    _currentLetter = letters[random.nextInt(letters.length)];
-    
-    // Select 5 random categories
-    final shuffledCategories = List<String>.from(_allCategories)..shuffle();
-    _currentCategories = shuffledCategories.take(5).toList();
-    
+  void _generateNewRound() async {
+    try {
+      // Call backend API to generate scattergories round
+      final response = await APIService.post('/games/scattergories/generate', {
+        'user_id': 'flutter_user',
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        _currentLetter = data['current_letter'];
+        _currentCategories = List<String>.from(data['categories']);
+      } else {
+        // Fallback to local generation
+        _generateRoundLocally();
+      }
+    } catch (e) {
+      // Fallback to local generation if API fails
+      _generateRoundLocally();
+    }
+
     // Create controllers for each category
     _controllers.clear();
     for (int i = 0; i < 5; i++) {
@@ -279,6 +253,18 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
     _message = '';
     _submissionResults.clear();
     setState(() {});
+  }
+
+  void _generateRoundLocally() {
+    final random = Random();
+    
+    // Generate random letter (avoiding difficult letters)
+    const letters = 'ABCDEFGHIJKLMNOPRSTUVWY'; // Removed Q, X, Z for better gameplay
+    _currentLetter = letters[random.nextInt(letters.length)];
+    
+    // Select 5 random categories
+    final shuffledCategories = List<String>.from(_allCategories)..shuffle();
+    _currentCategories = shuffledCategories.take(5).toList();
   }
 
   void _startGame() {
@@ -306,7 +292,7 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
     
     setState(() {
       _isSubmitting = true;
-      _message = 'Validating your answers with Claude...';
+      _message = 'Validating your answers...';
     });
     
     final answers = _controllers.map((c) => c.text.trim()).toList();
@@ -314,7 +300,55 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
     
     // Check if all 5 answers are completed before timer ends
     bool allCompleted = completedAnswers.length == 5 && _timerController.value < 1.0;
+
+    try {
+      // Use backend API for validation
+      final response = await APIService.post('/games/scattergories/validate', {
+        'user_id': 'flutter_user',
+        'answers': answers,
+        'categories': _currentCategories,
+        'current_letter': _currentLetter,
+        'all_completed_before_timer': allCompleted,
+      });
+
+      if (response['success'] == true) {
+        final data = response['data'];
+        final validAnswers = data['valid_answers'] ?? 0;
+        final points = (data['points'] ?? 0) as int;
+        _message = data['message'] ?? '$validAnswers valid answers. +$points Nyx Notes';
+        _submissionResults = List<String>.from(data['results'] ?? []);
+
+        if (points > 0) {
+          _score = _score + points;
+          final userProvider = Provider.of<UserProvider>(context, listen: false);
+          await userProvider.addNyxNotes(points);
+          
+          // Track game played for achievements (first time scoring points in this session)
+          await userProvider.incrementGamesPlayed();
+        }
+      } else {
+        // Fallback to local validation
+        await _submitAnswersLocally(answers, allCompleted);
+      }
+    } catch (e) {
+      // Fallback to local validation if API fails
+      await _submitAnswersLocally(answers, allCompleted);
+    }
     
+    // Store submission
+    final submission = <String, String>{};
+    for (int i = 0; i < _currentCategories.length; i++) {
+      submission[_currentCategories[i]] = answers[i];
+    }
+    _submissions.add(submission);
+    
+    setState(() {
+      _isSubmitting = false;
+    });
+  }
+
+  Future<void> _submitAnswersLocally(List<String> answers, bool allCompleted) async {
+    // Original local validation logic
     int validAnswers = 0;
     List<String> results = [];
     
@@ -324,7 +358,7 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
         continue;
       }
       
-      final isValid = await _validateAnswerWithClaude(answers[i], _currentCategories[i], _currentLetter);
+      final isValid = await _validateAnswerWithBackend(answers[i], _currentCategories[i], _currentLetter);
       if (isValid) {
         validAnswers++;
         results.add('✓ Valid');
@@ -352,48 +386,20 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
       await userProvider.incrementGamesPlayed();
     }
     
-    // Store submission
-    final submission = <String, String>{};
-    for (int i = 0; i < _currentCategories.length; i++) {
-      submission[_currentCategories[i]] = answers[i];
-    }
-    _submissions.add(submission);
     _submissionResults = results;
-    
-    setState(() {
-      _isSubmitting = false;
-    });
   }
 
-  Future<bool> _validateAnswerWithClaude(String answer, String category, String letter) async {
+  Future<bool> _validateAnswerWithBackend(String answer, String category, String letter) async {
     try {
-      const claudeApiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-      if (claudeApiKey.isEmpty) return _basicValidation(answer, letter);
-
-      final response = await http.post(
-        Uri.parse('https://api.anthropic.com/v1/messages'),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': claudeApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: json.encode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 50,
-          'system': 'You are a Scattergories validator. Check if the answer fits the category and starts with the correct letter. Answer only "YES" or "NO".',
-          'messages': [
-            {
-              'role': 'user',
-              'content': 'Does "$answer" fit the category "$category" and start with the letter "$letter"?',
-            }
-          ]
-        }),
-      ).timeout(const Duration(seconds: 5));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final content = data['content'][0]['text'].toString().trim().toUpperCase();
-        return content.contains('YES');
+      final response = await APIService.post('/words/validate', {
+        'word': answer,
+      });
+      
+      if (response['success'] == true) {
+        final isValidWord = response['data']['isValid'] ?? false;
+        // Also check category and letter match
+        final startsWithLetter = answer.trim()[0].toUpperCase() == letter.toUpperCase();
+        return isValidWord && startsWithLetter;
       }
     } catch (e) {
       // Fallback to basic validation
@@ -416,11 +422,19 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
+    return SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: EdgeInsets.only(
+        left: 16.0,
+        right: 16.0,
+        top: 16.0,
+        bottom: MediaQuery.of(context).viewInsets.bottom > 0 
+            ? MediaQuery.of(context).viewInsets.bottom + 80.0 
+            : 16.0,
+      ),
       child: Column(
         children: [
-          // Score and Round Info
+          // Score, Round Info, and Letter (condensed)
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -430,7 +444,24 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Round $_round', style: Theme.of(context).textTheme.titleMedium),
+                Text('Round $_round', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                )),
+                if (_currentLetter.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.secondary,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      _currentLetter,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSecondary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 Text('Score: $_score', style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: Theme.of(context).colorScheme.secondary,
                   fontWeight: FontWeight.bold,
@@ -440,58 +471,38 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
           ),
           const SizedBox(height: 16),
           
-          // Current Letter and Timer
-          if (_gameActive || _currentLetter.isNotEmpty) ...[
+          // Timer (separate container when game is active)
+          if (_gameActive) ...[
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Theme.of(context).colorScheme.secondary),
               ),
               child: Column(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        'Letter: ',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.secondary,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _currentLetter,
-                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSecondary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ],
+                  LinearProgressIndicator(
+                    value: _timerController.value,
+                    backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      _timerController.value > 0.8 ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.secondary,
+                    ),
                   ),
-                  if (_gameActive) ...[
-                    const SizedBox(height: 12),
-                    LinearProgressIndicator(
-                      value: _timerController.value,
-                      backgroundColor: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3),
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        _timerController.value > 0.8 ? Colors.red : Theme.of(context).colorScheme.secondary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${(_timerDuration * (1 - _timerController.value)).ceil()}s remaining',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: _timerController.value > 0.8 ? Colors.red : null,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
+                  const SizedBox(height: 8),
+                  AnimatedBuilder(
+                    animation: _timerController,
+                    builder: (context, child) {
+                      final remainingSeconds = (_timerDuration * (1 - _timerController.value)).ceil();
+                      return Text(
+                        '${remainingSeconds}s remaining',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: _timerController.value > 0.8 ? Theme.of(context).colorScheme.error : null,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),
@@ -504,7 +515,9 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
               child: SingleChildScrollView(
                 keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+                  bottom: MediaQuery.of(context).viewInsets.bottom > 0 
+                      ? MediaQuery.of(context).viewInsets.bottom + 80.0 
+                      : 20,
                 ),
                 child: Column(
                   children: List.generate(_currentCategories.length, (index) {
@@ -551,16 +564,16 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: _submissionResults[index].contains('✓') 
-                                      ? Colors.green.withValues(alpha: 0.1)
-                                      : Colors.red.withValues(alpha: 0.1),
+                                      ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1)
+                                      : Theme.of(context).colorScheme.error.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(
                                   _submissionResults[index],
                                   style: TextStyle(
                                     color: _submissionResults[index].contains('✓') 
-                                        ? Colors.green[700] 
-                                        : Colors.red[700],
+                                        ? Theme.of(context).colorScheme.secondary 
+                                        : Theme.of(context).colorScheme.error,
                                     fontWeight: FontWeight.w500,
                                     fontSize: 12,
                                   ),
@@ -585,7 +598,7 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
               margin: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
                 color: _message.contains('Amazing') 
-                    ? Colors.green.withValues(alpha: 0.1)
+                    ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.1)
                     : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -616,6 +629,9 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
                       backgroundColor: Theme.of(context).colorScheme.secondary,
                       foregroundColor: Theme.of(context).colorScheme.onSecondary,
                       padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     child: Text(_round == 1 ? 'Start Game' : 'Start Round $_round'),
                   ),
@@ -626,8 +642,8 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
                   child: ElevatedButton(
                     onPressed: _endGame,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF87A96B), // Sage green
-                      foregroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     child: const Text('Submit Early'),
@@ -698,18 +714,7 @@ class _ScattergoriesGameState extends State<ScattergoriesGame> with TickerProvid
   }
 }
 
-class ComingSoonWidget extends StatelessWidget {
-  const ComingSoonWidget({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const GamePlaceholder(
-      title: 'Coming Soon',
-      description: 'This game is still in development!',
-      icon: Icons.construction,
-    );
-  }
-}
+// ComingSoonWidget removed - using GamePlaceholder directly
 
 class GamePlaceholder extends StatelessWidget {
   final String title;

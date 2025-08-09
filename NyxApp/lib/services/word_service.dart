@@ -1,8 +1,7 @@
-import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:http/http.dart' as http;
 import '../services/logging_service.dart';
+import '../services/api_service.dart';
 
 class WordService {
   static List<String> _commonWords = [];
@@ -17,8 +16,15 @@ class WordService {
   ];
   
   static bool _isLoaded = false;
-  static const String claudeApiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-  static const String claudeApiUrl = 'https://api.anthropic.com/v1/messages';
+  
+  // Word history tracking to avoid repeats
+  static Map<String, List<String>> _usedWords = {
+    'unscramble': [],
+    'wordhunt': [],
+    'prefixgame': [],
+    'general': [],
+  };
+  static const int _maxHistorySize = 100; // Track last 100 words used per game
 
   static Future<void> _loadCommonWords() async {
     if (_isLoaded) return;
@@ -43,33 +49,35 @@ class WordService {
       LoggingService.logError('❌ Failed to load words_alpha.txt: $e');
     }
     
-    // Fallback: Try API
+    // Fallback: Try backend API
     try {
-      final response = await http.get(Uri.parse('https://nyxapp.lovable.app/api/words/common'));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          _commonWords = List<String>.from(data['words']);
-          _allValidWords = _commonWords; // Use same for validation
-          _isLoaded = true;
-          return;
-        }
+      final response = await APIService.get('/words/common');
+      if (response['success'] == true) {
+        _commonWords = List<String>.from(response['data']['words']);
+        _allValidWords = _commonWords; // Use same for validation
+        _isLoaded = true;
+        return;
       }
     } catch (e) {
-      // API not available, use Claude to generate words
+      // API not available
     }
     
-    // Fallback: Generate words using Claude API
+    // Fallback: Generate words using backend API
     try {
-      final words = await _generateWordsWithClaude();
-      if (words != null) {
+      final response = await APIService.post('/words/generate', {
+        'count': 1000,
+        'minLength': 4,
+        'maxLength': 6,
+      });
+      if (response['success'] == true) {
+        final words = List<String>.from(response['data']['words']);
         _commonWords = words;
         _allValidWords = words; // Use same for validation
         _isLoaded = true;
         return;
       }
     } catch (e) {
-      // Claude API failed
+      // Backend API failed
     }
     
     // Final fallback: Use hardcoded common words (4-6 letters) - easier for 8th-9th grade level
@@ -86,65 +94,6 @@ class WordService {
     _isLoaded = true;
   }
 
-  static Future<List<String>?> _generateWordsWithClaude() async {
-    try {
-      // Validate API key first
-      if (claudeApiKey.isEmpty) {
-        LoggingService.logError('❌ Claude API key is empty for word generation');
-        return null;
-      }
-
-      LoggingService.logInfo('🎯 Generating words with Claude API');
-
-      final response = await http.post(
-        Uri.parse(claudeApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': claudeApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: json.encode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 4000,
-          'system': 'You are a word list generator. Provide exactly 1000 common English words that are 4-6 letters long, suitable for 8th-9th grade reading level. Use simple, everyday words that are familiar to teenagers. Return only the words in uppercase, one per line, no numbers or extra text.',
-          'messages': [
-            {
-              'role': 'user',
-              'content': 'Generate 1000 simple, common English words for word games, 4-6 letters each, at 8th-9th grade reading level.',
-            }
-          ],
-        }),
-      ).timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        // Robust JSON structure validation
-        if (data is Map<String, dynamic> && 
-            data['content'] is List && 
-            (data['content'] as List).isNotEmpty &&
-            data['content'][0] is Map<String, dynamic> &&
-            data['content'][0]['text'] is String) {
-          final wordsText = data['content'][0]['text'] as String;
-          final words = wordsText.split('\n')
-              .map((w) => w.trim().toUpperCase())
-              .where((w) => w.isNotEmpty && w.length >= 4 && w.length <= 6)
-              .toList();
-          
-          if (words.length >= 20) {  // Minimum viable word count
-            return words;
-          }
-        } else {
-          LoggingService.logError('Invalid JSON structure in word generation: ${data.toString()}');
-        }
-      } else {
-        LoggingService.logError('Word generation API error: ${response.body}');
-      }
-      return null;
-    } catch (e) {
-      LoggingService.logError('Word generation exception: $e');
-      return null;
-    }
-  }
 
   static Future<List<String>> getWordsForGame(String gameType, {int count = 20}) async {
     // Special handling for unscramble game
@@ -154,139 +103,119 @@ class WordService {
     
     await _loadCommonWords();
     
-    final random = Random();
-    final words = <String>[];
+    final random = Random(DateTime.now().millisecondsSinceEpoch);
     
-    // Mix: 40% mental health words, 60% general words
-    final mentalHealthCount = (count * 0.4).round();
-    final generalCount = count - mentalHealthCount;
+    // Combine all words
+    final allWords = [..._mentalHealthWords, ..._commonWords];
     
-    // Add mental health words
-    final shuffledMentalHealth = List<String>.from(_mentalHealthWords)..shuffle(random);
-    words.addAll(shuffledMentalHealth.take(mentalHealthCount));
+    // Filter out recently used words
+    final availableWords = _filterUsedWords(gameType, allWords);
     
-    // Add general words
-    final shuffledGeneral = List<String>.from(_commonWords)..shuffle(random);
-    words.addAll(shuffledGeneral.take(generalCount));
+    // Shuffle and select words
+    availableWords.shuffle(random);
+    final selectedWords = availableWords.take(count).toList();
     
-    // Shuffle the final mix
-    words.shuffle(random);
+    // Add selected words to history
+    for (final word in selectedWords) {
+      _addToHistory(gameType, word);
+    }
     
-    return words;
+    LoggingService.logInfo('✅ Generated ${selectedWords.length} words for $gameType (${availableWords.length} available)');
+    return selectedWords;
+  }
+
+  // Helper method to manage word history
+  static void _addToHistory(String gameType, String word) {
+    if (!_usedWords.containsKey(gameType)) {
+      _usedWords[gameType] = [];
+    }
+    
+    _usedWords[gameType]!.add(word);
+    
+    // Keep only the last _maxHistorySize words
+    if (_usedWords[gameType]!.length > _maxHistorySize) {
+      _usedWords[gameType]!.removeAt(0);
+    }
+  }
+  
+  // Helper method to filter out recently used words
+  static List<String> _filterUsedWords(String gameType, List<String> words) {
+    if (!_usedWords.containsKey(gameType)) {
+      return words;
+    }
+    
+    final usedWordsSet = Set<String>.from(_usedWords[gameType]!);
+    final availableWords = words.where((word) => !usedWordsSet.contains(word)).toList();
+    
+    // If we filtered out too many words, reset history and use original list
+    if (availableWords.length < words.length * 0.3) {
+      _usedWords[gameType]!.clear();
+      LoggingService.logInfo('⚠️ Reset word history for $gameType - too many words filtered');
+      return words;
+    }
+    
+    return availableWords;
   }
 
   static Future<List<String>> getUnscrambleWords({int count = 20}) async {
-    final random = Random();
+    final random = Random(DateTime.now().millisecondsSinceEpoch);
     final words = <String>[];
     
     // Try to load from common_words.txt first
     try {
       final String content = await rootBundle.loadString('assets/common_words.txt');
-      final commonWordsFromFile = content.split('\n')
+      final allWordsFromFile = content.split('\n')
           .map((word) => word.trim().toUpperCase())
-          .where((word) => word.isNotEmpty && word.length >= 4 && word.length <= 6) // Updated to 4-6 letters
+          .where((word) => word.isNotEmpty && word.length >= 4 && word.length <= 6)
           .toList();
       
-      if (commonWordsFromFile.length >= count) {
-        commonWordsFromFile.shuffle(random);
-        words.addAll(commonWordsFromFile.take(count));
-        LoggingService.logInfo('✅ Generated ${words.length} unscramble words from common_words.txt (4-6 letters)');
+      if (allWordsFromFile.length >= count) {
+        // Filter out recently used words
+        final availableWords = _filterUsedWords('unscramble', allWordsFromFile);
+        
+        // Shuffle and select words
+        availableWords.shuffle(random);
+        final selectedWords = availableWords.take(count).toList();
+        
+        // Add selected words to history
+        for (final word in selectedWords) {
+          _addToHistory('unscramble', word);
+        }
+        
+        words.addAll(selectedWords);
+        LoggingService.logInfo('✅ Generated ${words.length} unscramble words from common_words.txt (4-6 letters, ${availableWords.length} available)');
         return words;
       }
     } catch (e) {
       LoggingService.logError('❌ Failed to load common_words.txt for unscramble: $e');
     }
     
-    // Fallback: Use existing method with updated letter count
+    // Fallback: Use existing method with updated letter count and history tracking
     await _loadCommonWords();
     
-    // 50% mental health/psychological words, 50% general/interesting words
-    final mentalHealthCount = (count * 0.5).round();
-    final generalCount = count - mentalHealthCount;
-    
-    // Try to get additional words from Claude API for better variety
-    List<String> claudeMentalWords = [];
-    List<String> claudeGeneralWords = [];
-    
-    if (claudeApiKey.isNotEmpty) {
-      claudeMentalWords = await _generateUnscrambleWords('mental health and psychological wellness', mentalHealthCount) ?? [];
-      claudeGeneralWords = await _generateUnscrambleWords('general interesting topics', generalCount) ?? [];
-    }
-    
-    // Combine Claude words with existing lists
-    final allMentalHealthWords = [..._mentalHealthWords, ...claudeMentalWords];
-    final allGeneralWords = [..._commonWords, ...claudeGeneralWords];
-    
-    // Filter to 4-6 letters for optimal gameplay
-    final mentalHealthFiltered = allMentalHealthWords
-        .where((word) => word.length >= 4 && word.length <= 6)
-        .toList();
-    final generalFiltered = allGeneralWords
+    // Combine all available words and filter to 4-6 letters
+    final allWords = [..._mentalHealthWords, ..._commonWords];
+    final filteredWords = allWords
         .where((word) => word.length >= 4 && word.length <= 6)
         .toList();
     
-    // Add mental health words
-    final shuffledMentalHealth = List<String>.from(mentalHealthFiltered)..shuffle(random);
-    words.addAll(shuffledMentalHealth.take(mentalHealthCount));
+    // Filter out recently used words
+    final availableWords = _filterUsedWords('unscramble', filteredWords);
     
-    // Add general words
-    final shuffledGeneral = List<String>.from(generalFiltered)..shuffle(random);
-    words.addAll(shuffledGeneral.take(generalCount));
+    // Shuffle and select words
+    availableWords.shuffle(random);
+    final selectedWords = availableWords.take(count).toList();
     
-    // Shuffle the final mix
-    words.shuffle(random);
-    
-    LoggingService.logInfo('✅ Generated ${words.length} unscramble words (${mentalHealthCount} mental health, ${generalCount} general) - 4-6 letters');
-    return words.take(count).toList();
-  }
-
-  static Future<List<String>?> _generateUnscrambleWords(String category, int count) async {
-    try {
-      if (claudeApiKey.isEmpty) return null;
-
-      final response = await http.post(
-        Uri.parse(claudeApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': claudeApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: json.encode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 500,
-          'system': 'You are a word generator for unscramble games. Generate exactly $count simple, common English words that are 4-6 letters long, at 8th-9th grade reading level, related to the given category. Use everyday words that teenagers would know. Return only the words in uppercase, one per line, no numbers or extra text.',
-          'messages': [
-            {
-              'role': 'user',
-              'content': 'Generate $count simple words (4-6 letters each) at 8th-9th grade level related to: $category',
-            }
-          ],
-        }),
-      ).timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data is Map<String, dynamic> && 
-            data['content'] is List && 
-            (data['content'] as List).isNotEmpty &&
-            data['content'][0] is Map<String, dynamic> &&
-            data['content'][0]['text'] is String) {
-          final wordsText = data['content'][0]['text'] as String;
-          final words = wordsText.split('\n')
-              .map((w) => w.trim().toUpperCase())
-              .where((w) => w.isNotEmpty && w.length >= 4 && w.length <= 6)
-              .toList();
-          
-          LoggingService.logInfo('✅ Generated ${words.length} $category words via Claude');
-          return words;
-        }
-      }
-      return null;
-    } catch (e) {
-      LoggingService.logError('❌ Failed to generate $category words: $e');
-      return null;
+    // Add selected words to history
+    for (final word in selectedWords) {
+      _addToHistory('unscramble', word);
     }
+    
+    words.addAll(selectedWords);
+    LoggingService.logInfo('✅ Generated ${words.length} unscramble words (fallback mode, ${availableWords.length} available) - 4-6 letters');
+    return words;
   }
+
 
   static Future<String> getRandomWord() async {
     final words = await getWordsForGame('general', count: 1);
@@ -301,15 +230,19 @@ class WordService {
         .where((word) => word.startsWith(prefix.toUpperCase()))
         .toList();
     
-    // If we don't have enough prefix words from words_alpha.txt, use Claude API fallback
+    // If we don't have enough prefix words from words_alpha.txt, use backend API fallback
     if (prefixWords.length < 5) {
       try {
-        final claudeWords = await _generatePrefixWordsWithClaude(prefix);
-        if (claudeWords != null) {
-          prefixWords.addAll(claudeWords);
+        final response = await APIService.post('/words/generate-prefix', {
+          'prefix': prefix,
+          'count': 10,
+        });
+        if (response['success'] == true) {
+          final words = List<String>.from(response['data']['words']);
+          prefixWords.addAll(words);
         }
       } catch (e) {
-        // Claude API failed, use what we have
+        // Backend API failed, use what we have
       }
     }
     
@@ -327,44 +260,17 @@ class WordService {
       return true;
     }
     
-    // Fallback: Use Claude API for validation
-    return await _validateWordWithClaude(upperWord);
+    // Fallback: Use backend API for validation
+    return await _validateWordWithBackend(upperWord);
   }
 
-  static Future<bool> _validateWordWithClaude(String word) async {
+  static Future<bool> _validateWordWithBackend(String word) async {
     try {
-      if (claudeApiKey.isEmpty) return false;
-
-      final response = await http.post(
-        Uri.parse(claudeApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': claudeApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: json.encode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 50,
-          'system': 'You are a word validator. Answer only "YES" if the word is a valid English word, or "NO" if it is not. No explanations.',
-          'messages': [
-            {
-              'role': 'user',
-              'content': 'Is "$word" a valid English word?',
-            }
-          ],
-        }),
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data is Map<String, dynamic> && 
-            data['content'] is List && 
-            (data['content'] as List).isNotEmpty &&
-            data['content'][0] is Map<String, dynamic> &&
-            data['content'][0]['text'] is String) {
-          final responseText = (data['content'][0]['text'] as String).trim().toUpperCase();
-          return responseText.contains('YES');
-        }
+      final response = await APIService.post('/words/validate', {
+        'word': word,
+      });
+      if (response['success'] == true) {
+        return response['data']['isValid'] ?? false;
       }
       return false;
     } catch (e) {
@@ -415,80 +321,57 @@ class WordService {
     }
   }
 
-  static Future<List<String>?> _generatePrefixWordsWithClaude(String prefix) async {
-    try {
-      final response = await http.post(
-        Uri.parse(claudeApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': claudeApiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: json.encode({
-          'model': 'claude-sonnet-4-20250514',
-          'max_tokens': 500,
-          'system': 'You are a word generator. Provide exactly 10 common English words that start with the given prefix. Return only the words in uppercase, one per line, no numbers or extra text.',
-          'messages': [
-            {
-              'role': 'user',
-              'content': 'Generate 10 common English words that start with "$prefix"',
-            }
-          ],
-        }),
-      ).timeout(const Duration(seconds: 20));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        // Robust JSON structure validation
-        if (data is Map<String, dynamic> && 
-            data['content'] is List && 
-            (data['content'] as List).isNotEmpty &&
-            data['content'][0] is Map<String, dynamic> &&
-            data['content'][0]['text'] is String) {
-          final wordsText = data['content'][0]['text'] as String;
-          final words = wordsText.split('\n')
-              .map((w) => w.trim().toUpperCase())
-              .where((w) => w.isNotEmpty && w.startsWith(prefix.toUpperCase()))
-              .toList();
-          
-          return words;
-        }
-      }
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
 
   static Future<List<String>> getWordHuntWords({required int count, required int minLength, required int maxLength}) async {
+    final random = Random(DateTime.now().millisecondsSinceEpoch);
+    
     try {
       // Load directly from common_words.txt file
       final String content = await rootBundle.loadString('assets/common_words.txt');
-      final commonWordsFromFile = content.split('\n')
+      final allWordsFromFile = content.split('\n')
           .map((word) => word.trim().toUpperCase())
           .where((word) => word.isNotEmpty && word.length >= minLength && word.length <= maxLength)
           .toList();
       
-      final random = Random();
-      commonWordsFromFile.shuffle(random);
+      // Filter out recently used words
+      final availableWords = _filterUsedWords('wordhunt', allWordsFromFile);
       
-      LoggingService.logInfo('✅ Generated ${count} Word Hunt words from common_words.txt');
-      return commonWordsFromFile.take(count).toList();
+      // Shuffle and select words
+      availableWords.shuffle(random);
+      final selectedWords = availableWords.take(count).toList();
+      
+      // Add selected words to history
+      for (final word in selectedWords) {
+        _addToHistory('wordhunt', word);
+      }
+      
+      LoggingService.logInfo('✅ Generated ${selectedWords.length} Word Hunt words from common_words.txt (${availableWords.length} available)');
+      return selectedWords;
     } catch (e) {
       LoggingService.logError('❌ Failed to load common_words.txt for Word Hunt: $e');
       
-      // Fallback to existing method
+      // Fallback to existing method with history tracking
       await _loadCommonWords();
       
       final allWords = [..._mentalHealthWords, ..._commonWords];
-      final suitableWords = allWords
+      final filteredWords = allWords
           .where((word) => word.length >= minLength && word.length <= maxLength)
           .toList();
       
-      final random = Random();
-      suitableWords.shuffle(random);
+      // Filter out recently used words
+      final availableWords = _filterUsedWords('wordhunt', filteredWords);
       
-      return suitableWords.take(count).toList();
+      // Shuffle and select words
+      availableWords.shuffle(random);
+      final selectedWords = availableWords.take(count).toList();
+      
+      // Add selected words to history
+      for (final word in selectedWords) {
+        _addToHistory('wordhunt', word);
+      }
+      
+      LoggingService.logInfo('✅ Generated ${selectedWords.length} Word Hunt words (fallback mode, ${availableWords.length} available)');
+      return selectedWords;
     }
   }
 }

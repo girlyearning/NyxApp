@@ -73,13 +73,13 @@ class NauticalNyxScreen extends StatelessWidget {
               features: [
                 FeatureItem(
                   title: 'Default Nyx',
-                  description: 'Chat with the original Nyx personality - balanced and supportive.',
+                  description: 'Chat with the original atypical Nurse Nyx.',
                   icon: Icons.person,
                   onTap: () => _navigateToChat(context, 'Default Nyx', 'default'),
                 ),
                 FeatureItem(
                   title: 'Ride or Die Nyx',
-                  description: 'Chat with the expressively loyal Nyx - passionate and devoted.',
+                  description: 'Chat with the expressively loyal Nyx.',
                   icon: Icons.favorite,
                   onTap: () => _navigateToChat(context, 'Ride or Die Nyx', 'ride_or_die'),
                 ),
@@ -91,7 +91,7 @@ class NauticalNyxScreen extends StatelessWidget {
                 ),
                 FeatureItem(
                   title: 'Debate Master Nyx',
-                  description: 'Engage in spirited debates with intellectually challenging Nyx.',
+                  description: 'Engage in spirited debates with rage-baiting Nyx.',
                   icon: Icons.gavel,
                   onTap: () => _navigateToChat(context, 'Debate Master Nyx', 'debate_master'),
                 ),
@@ -99,19 +99,19 @@ class NauticalNyxScreen extends StatelessWidget {
                   title: 'ADHD Nyx',
                   description: 'A Nyx personality curated to those with ADHD.',
                   icon: Icons.flash_on,
-                  onTap: () => _navigateToChat(context, 'ADHD Nyx', 'adhd'),
+                  onTap: () => _navigateToChat(context, 'ADHD Nyx', 'adhd_nyx'),
                 ),
                 FeatureItem(
                   title: 'Autistic Nyx',
                   description: 'A Nyx personality curated to those with ASD.',
                   icon: Icons.grid_view,
-                  onTap: () => _navigateToChat(context, 'Autistic Nyx', 'autistic'),
+                  onTap: () => _navigateToChat(context, 'Autistic Nyx', 'autistic_nyx'),
                 ),
                 FeatureItem(
                   title: 'AuDHD Nyx',
                   description: 'A Nyx personality curated to those with ADHD and ASD.',
                   icon: Icons.auto_awesome,
-                  onTap: () => _navigateToChat(context, 'AuDHD Nyx', 'audhd'),
+                  onTap: () => _navigateToChat(context, 'AuDHD Nyx', 'autistic_adhd'),
                 ),
               ],
             ),

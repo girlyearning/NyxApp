@@ -105,7 +105,7 @@ class MoodProvider extends ChangeNotifier {
 
     try {
       // Try to submit to API first
-      final apiResult = await APIService.trackMood(
+      await APIService.trackMood(
         userId: userId,
         mood: emoji,
         notes: mood,

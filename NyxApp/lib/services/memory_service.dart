@@ -2,7 +2,7 @@ import 'api_service.dart';
 import 'conversation_memory_service.dart';
 
 class MemoryService {
-  static const String _baseUrl = '/api/memories';
+  static const String _baseUrl = '/memories';
 
   static Future<Map<String, dynamic>> getUserMemories(String userId) async {
     try {

@@ -243,11 +243,11 @@ class NauticalNyxService {
         return 'Dream Analysis';
       case 'debate_master':
         return 'Debate Session';
-      case 'adhd':
+      case 'adhd_nyx':
         return 'ADHD Nyx Chat';
-      case 'autistic':
+      case 'autistic_nyx':
         return 'Autistic Nyx Chat';
-      case 'audhd':
+      case 'autistic_adhd':
         return 'AuDHD Nyx Chat';
       default:
         return 'Nyx Chat';
@@ -286,12 +286,13 @@ class NauticalNyxService {
   }
 
   // Send thumbs down response
-  static Future<String> sendThumbsDownResponse(String originalMessage, String personality, String sessionId) async {
+  static Future<String> sendThumbsDownResponse(String originalMessage, String personality, String sessionId, {String? userId}) async {
     try {
       final chatService = ChatService();
       final response = await chatService.getThumbsDownResponse(
         originalMessage: originalMessage,
         mode: personality,
+        userId: userId,
       );
       
       if (response == null) {

@@ -340,11 +340,11 @@ class _NauticalSessionsScreenState extends State<NauticalSessionsScreen> {
         return Icons.psychology;
       case 'debate_master':
         return Icons.gavel;
-      case 'adhd':
+      case 'adhd_nyx':
         return Icons.flash_on;
-      case 'autistic':
+      case 'autistic_nyx':
         return Icons.grid_view;
-      case 'audhd':
+      case 'autistic_adhd':
         return Icons.auto_awesome;
       default:
         return Icons.chat;

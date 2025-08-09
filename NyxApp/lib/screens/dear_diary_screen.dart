@@ -4,7 +4,6 @@ import '../models/journal_entry.dart';
 import '../models/journal_folder.dart';
 import '../services/journal_service.dart';
 import '../services/prompt_service.dart';
-import '../services/qotd_responses_service.dart';
 import '../providers/user_provider.dart';
 import '../providers/theme_provider.dart';
 import 'journal_entry_screen.dart';
@@ -123,6 +122,79 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
     }
   }
 
+  Future<void> _moveEntryToFolder(JournalEntry entry) async {
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Move Entry to Folder'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('No Folder'),
+                leading: const Icon(Icons.folder_open),
+                onTap: () => Navigator.pop(context, 'none'),
+              ),
+              ..._folders.map((folder) => ListTile(
+                title: Text(folder.name),
+                leading: const Icon(Icons.folder),
+                onTap: () => Navigator.pop(context, folder.id),
+              )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null) {
+      try {
+        final folderId = result == 'none' ? null : result;
+        final success = await JournalService.moveEntryToFolder(entry.id, folderId);
+        
+        if (success) {
+          await _loadEntries();
+          final folderName = result == 'none' 
+              ? 'No Folder' 
+              : _folders.firstWhere((f) => f.id == result).name;
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Entry moved to "$folderName"'),
+                backgroundColor: Colors.blue,
+              ),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to move entry'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Error moving entry'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _showPromptTypeDialog() async {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     
@@ -216,7 +288,7 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                 height: 50,
                 margin: const EdgeInsets.symmetric(vertical: 4),
                 child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context, 'adhd'),
+                  onPressed: () => Navigator.pop(context, 'adhd_nyx'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF7aa5bf),
                     foregroundColor: Colors.white,
@@ -349,14 +421,18 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
       context: context,
       barrierDismissible: false,
       barrierColor: Colors.black54,
-      builder: (context) => Dialog(
+      builder: (context) => Scaffold(
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: true,
+        body: Center(
+          child: Dialog(
         backgroundColor: dialogBackgroundColor,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
           width: MediaQuery.of(context).size.width * 0.9,
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
+            maxHeight: MediaQuery.of(context).size.height * 0.75,
             maxWidth: 500,
           ),
           padding: const EdgeInsets.all(20),
@@ -376,24 +452,33 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: (themeProvider.themeMode == AppThemeMode.light || themeProvider.themeMode == AppThemeMode.dark)
-                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
-                      : Colors.black.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: (themeProvider.themeMode == AppThemeMode.light || themeProvider.themeMode == AppThemeMode.dark)
-                        ? Theme.of(context).colorScheme.primary
-                        : Colors.white.withValues(alpha: 0.3),
-                    width: 1,
+              Flexible(
+                child: Container(
+                  constraints: const BoxConstraints(
+                    maxHeight: 120,
                   ),
-                ),
-                child: Text(
-                  _currentPrompt!,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: textColor,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: (themeProvider.themeMode == AppThemeMode.light || themeProvider.themeMode == AppThemeMode.dark)
+                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.1)
+                        : Colors.black.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (themeProvider.themeMode == AppThemeMode.light || themeProvider.themeMode == AppThemeMode.dark)
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.white.withValues(alpha: 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Scrollbar(
+                    child: SingleChildScrollView(
+                      child: Text(
+                        _currentPrompt!,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: textColor,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -406,11 +491,11 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Flexible(
+              Expanded(
                 child: Container(
                   constraints: const BoxConstraints(
-                    minHeight: 150,
-                    maxHeight: 300,
+                    minHeight: 120,
+                    maxHeight: 250,
                   ),
                   decoration: BoxDecoration(
                     color: (themeProvider.themeMode == AppThemeMode.light || themeProvider.themeMode == AppThemeMode.dark)
@@ -430,12 +515,15 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                       keyboardType: TextInputType.multiline,
                       textInputAction: TextInputAction.newline,
                       textCapitalization: TextCapitalization.sentences,
+                      scrollPhysics: const BouncingScrollPhysics(),
                       onChanged: (value) => responseText = value,
                       decoration: InputDecoration(
                         hintText: 'Type your response here...',
                         hintStyle: TextStyle(color: textColor.withValues(alpha: 0.6)),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.all(12),
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
                       ),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: textColor,
@@ -461,7 +549,7 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                         if (responseText.trim().isNotEmpty) {
                           await _submitPromptResponse(responseText.trim());
                           controller.dispose();
-                          Navigator.pop(context);
+                          if (mounted) Navigator.pop(context);
                         }
                       },
                       style: ElevatedButton.styleFrom(
@@ -469,15 +557,20 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
-                      child: const Text(
-                        'Submit for 20 Nyx Notes',
-                        overflow: TextOverflow.ellipsis,
+                      child: const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          'Submit for 20 Nyx Notes',
+                          style: TextStyle(fontSize: 14),
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
             ],
+          ),
+        ),
           ),
         ),
       ),
@@ -507,7 +600,7 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLength: 50,
-              autofocus: true,
+              autofocus: false,
             ),
           ],
         ),
@@ -657,12 +750,6 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
         userId: userProvider.currentUserId,
       );
       
-      // Save to QOTD responses service for Resident Records access
-      await QotdResponsesService.saveResponse(
-        'Prompt: $_currentPrompt',
-        responseText,
-      );
-      
       // Award 20 Nyx Notes
       await userProvider.addNyxNotes(20);
       
@@ -773,13 +860,16 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Generating ${_selectedPromptType} prompt...',
+                  'Generating $_selectedPromptType prompt...',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
             )
           else if (_currentPrompt != null)
             Container(
+              constraints: const BoxConstraints(
+                maxHeight: 120,
+              ),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
@@ -788,9 +878,13 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                   color: Theme.of(context).colorScheme.outline,
                 ),
               ),
-              child: Text(
-                _currentPrompt!,
-                style: Theme.of(context).textTheme.bodyMedium,
+              child: Scrollbar(
+                child: SingleChildScrollView(
+                  child: Text(
+                    _currentPrompt!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
               ),
             ),
           const SizedBox(height: 12),
@@ -832,7 +926,11 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                     style: OutlinedButton.styleFrom(
                       side: BorderSide(color: Theme.of(context).colorScheme.primary),
                     ),
-                    child: const Text('New Prompt'),
+                    child: const Text(
+                      'New Prompt',
+                      style: TextStyle(fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ),
               ],
@@ -881,9 +979,21 @@ class _DearDiaryScreenState extends State<DearDiaryScreen> {
                     onSelected: (value) {
                       if (value == 'delete') {
                         _deleteEntry(entry);
+                      } else if (value == 'move') {
+                        _moveEntryToFolder(entry);
                       }
                     },
                     itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'move',
+                        child: Row(
+                          children: [
+                            Icon(Icons.folder, color: Colors.blue, size: 20),
+                            SizedBox(width: 8),
+                            Text('Move to Folder'),
+                          ],
+                        ),
+                      ),
                       const PopupMenuItem(
                         value: 'delete',
                         child: Row(

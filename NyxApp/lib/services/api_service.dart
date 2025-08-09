@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class APIService {
-  static const String baseUrl = 'https://nyxapp.lovable.app/api';
-  static const Duration timeout = Duration(seconds: 10);
+  static const String baseUrl = 'https://nyxapp.onrender.com/api';
+  static const Duration timeout = Duration(seconds: 5);
 
   // General HTTP methods
   static Future<Map<String, dynamic>> get(String endpoint) async {
@@ -13,19 +13,42 @@ class APIService {
         headers: {'Content-Type': 'application/json'},
       ).timeout(timeout);
 
+      // Validate HTTP status code
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      // Validate Content-Type header
+      final contentType = response.headers['content-type'];
+      if (contentType == null || !contentType.contains('application/json')) {
+        throw Exception('Invalid Content-Type: $contentType');
+      }
+
       return json.decode(response.body);
     } catch (e) {
       throw Exception('GET request failed: $e');
     }
   }
 
-  static Future<Map<String, dynamic>> post(String endpoint, Map<String, dynamic> data) async {
+  static Future<Map<String, dynamic>> post(String endpoint, Map<String, dynamic> data, {Duration? customTimeout}) async {
     try {
+      final requestTimeout = customTimeout ?? timeout;
       final response = await http.post(
         Uri.parse('$baseUrl$endpoint'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(data),
-      ).timeout(timeout);
+      ).timeout(requestTimeout);
+
+      // Validate HTTP status code
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      // Validate Content-Type header
+      final contentType = response.headers['content-type'];
+      if (contentType == null || !contentType.contains('application/json')) {
+        throw Exception('Invalid Content-Type: $contentType');
+      }
 
       return json.decode(response.body);
     } catch (e) {
@@ -39,6 +62,17 @@ class APIService {
         Uri.parse('$baseUrl$endpoint'),
         headers: {'Content-Type': 'application/json'},
       ).timeout(timeout);
+
+      // Validate HTTP status code
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+
+      // Validate Content-Type header
+      final contentType = response.headers['content-type'];
+      if (contentType == null || !contentType.contains('application/json')) {
+        throw Exception('Invalid Content-Type: $contentType');
+      }
 
       return json.decode(response.body);
     } catch (e) {

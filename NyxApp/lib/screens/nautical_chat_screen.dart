@@ -5,7 +5,6 @@ import '../services/nautical_nyx_service.dart';
 import '../widgets/chat_bubble.dart';
 import '../widgets/optimized_chat_input.dart';
 import '../providers/user_provider.dart';
-import '../utils/personality_colors.dart';
 import '../screens/report_content_screen.dart';
 
 class NauticalChatScreen extends StatefulWidget {
@@ -24,24 +23,45 @@ class NauticalChatScreen extends StatefulWidget {
   State<NauticalChatScreen> createState() => _NauticalChatScreenState();
 }
 
-class _NauticalChatScreenState extends State<NauticalChatScreen> {
+class _NauticalChatScreenState extends State<NauticalChatScreen> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<ChatMessage> _messages = [];
   bool _isLoading = false;
+  double _previousKeyboardHeight = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSession();
   }
 
   @override
   void dispose() {
     _createMemoryIfNeeded();
+    WidgetsBinding.instance.removeObserver(this);
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    final currentKeyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    
+    // If keyboard state changed, scroll to bottom
+    if (currentKeyboardHeight != _previousKeyboardHeight) {
+      _previousKeyboardHeight = currentKeyboardHeight;
+      
+      // Use a slight delay to ensure layout has updated
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) {
+          _scrollToBottom();
+        }
+      });
+    }
   }
 
   Future<void> _createMemoryIfNeeded() async {
@@ -76,10 +96,13 @@ class _NauticalChatScreenState extends State<NauticalChatScreen> {
           _isLoading = true;
         });
 
+        if (!mounted) return;
+        final userProvider = Provider.of<UserProvider>(context, listen: false);
         final response = await NauticalNyxService.sendThumbsDownResponse(
           reactedMessage.content,
           widget.personality,
           widget.sessionId,
+          userId: userProvider.currentUserId,
         );
 
         if (mounted) {
@@ -143,9 +166,9 @@ class _NauticalChatScreenState extends State<NauticalChatScreen> {
         return "Welcome to the realm of dreams and the unconscious mind. I'm here to help you explore the fascinating world of your dreams and psychological patterns. Have any interesting dreams lately?";
       case 'debate_master':
         return "I hope you enjoy being rage-baited. What would you like to debate today?";
-      case 'adhd':
-      case 'autistic':
-      case 'audhd':
+      case 'adhd_nyx':
+      case 'autistic_nyx':
+      case 'autistic_adhd':
         return "Nice of you to pop in. What's up?";
       default:
         return "Hello! I'm Nyx, and I'm here to support you. How are you feeling today?";
@@ -386,6 +409,7 @@ class _NauticalChatScreenState extends State<NauticalChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         title: Text(
           widget.title,
@@ -450,63 +474,84 @@ class _NauticalChatScreenState extends State<NauticalChatScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Messages list
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              itemCount: _messages.length,
-              itemBuilder: (context, index) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: ChatBubble(
-                    message: _messages[index],
-                    isLoading: false,
-                    onReaction: (reaction) => _handleReaction(_messages[index].id, reaction),
-                  ),
-                );
-              },
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Messages list
+            Expanded(
+              child: GestureDetector(
+                onTap: () => FocusScope.of(context).unfocus(),
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _messages.length,
+                  reverse: false,
+                  keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
+                  itemBuilder: (context, index) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: ChatBubble(
+                        message: _messages[index],
+                        isLoading: false,
+                        onReaction: (reaction) => _handleReaction(_messages[index].id, reaction),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ),
-          ),
 
-          // Loading indicator
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(width: 16),
-                  Text('Nyx is thinking...'),
+            // Loading indicator
+            if (_isLoading)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: const Row(
+                  children: [
+                    CircularProgressIndicator(strokeWidth: 2),
+                    SizedBox(width: 16),
+                    Text('Nyx is thinking...'),
+                  ],
+                ),
+              ),
+
+            // Message input
+            Container(
+              padding: EdgeInsets.only(
+                left: 8,
+                right: 8,
+                top: 8,
+                bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 8 : 0,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.1),
+                  ),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.05),
+                    offset: const Offset(0, -2),
+                    blurRadius: 4,
+                  ),
                 ],
               ),
-            ),
-
-          // Message input
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              border: Border(
-                top: BorderSide(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3)),
+              child: OptimizedChatInput(
+                controller: _messageController,
+                onSend: _sendMessage,
+                isLoading: _isLoading,
+                hintText: 'Type your message...',
+                onTap: () {
+                  // Scroll to bottom when keyboard opens
+                  Future.delayed(const Duration(milliseconds: 300), () {
+                    _scrollToBottom();
+                  });
+                },
               ),
             ),
-            child: OptimizedChatInput(
-              controller: _messageController,
-              onSend: _sendMessage,
-              isLoading: _isLoading,
-              hintText: 'Type your message...',
-              onTap: () {
-                // Scroll to bottom when keyboard opens
-                Future.delayed(const Duration(milliseconds: 300), () {
-                  _scrollToBottom();
-                });
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

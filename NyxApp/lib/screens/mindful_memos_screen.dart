@@ -4,8 +4,6 @@ import 'package:provider/provider.dart';
 import '../providers/user_provider.dart';
 import '../services/api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:math';
 import 'dear_diary_screen.dart';
 import '../services/qotd_responses_service.dart';
@@ -49,42 +47,17 @@ class _MindfulMemosScreenState extends State<MindfulMemosScreen> {
     });
   }
 
-  Future<String?> _callClaudeAPI(String prompt) async {
+  Future<String?> _callBackendAPI(String prompt) async {
     try {
-      const apiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-      if (apiKey == null || apiKey.isEmpty) {
-        return null;
-      }
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      final response = await APIService.post('/chat/message', {
+        'user_id': userProvider.currentUserId,
+        'message': prompt,
+        'mode': 'queries',
+      });
       
-      const claudeApiUrl = 'https://api.anthropic.com/v1/messages';
-      
-      final requestBody = {
-        'model': 'claude-sonnet-4-20250514',
-        'max_tokens': 200,
-        'system': 'You are Nyx, a mental health companion. Generate thoughtful, introspective questions that promote self-reflection and mental wellness. Keep responses concise and meaningful.',
-        'messages': [
-          {
-            'role': 'user',
-            'content': prompt,
-          }
-        ]
-      };
-      
-      final response = await http.post(
-        Uri.parse(claudeApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: json.encode(requestBody),
-      ).timeout(const Duration(seconds: 10));
-      
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['content'] != null && data['content'].isNotEmpty) {
-          return data['content'][0]['text']?.trim();
-        }
+      if (response['success'] == true) {
+        return response['data']['response']?.trim();
       }
       
       return null;
@@ -135,12 +108,12 @@ class _MindfulMemosScreenState extends State<MindfulMemosScreen> {
       final random = Random();
       final selectedPrompt = prompts[random.nextInt(prompts.length)];
       
-      // Try Claude API directly first
-      final claudeResponse = await _callClaudeAPI(selectedPrompt);
+      // Try backend API first
+      final backendResponse = await _callBackendAPI(selectedPrompt);
       
-      if (claudeResponse != null && claudeResponse.isNotEmpty && claudeResponse.length > 10) {
+      if (backendResponse != null && backendResponse.isNotEmpty && backendResponse.length > 10) {
         // Clean up the response - remove quotes if present
-        _currentQuestion = claudeResponse.replaceAll('"', '').replaceAll("'", '');
+        _currentQuestion = backendResponse.replaceAll('"', '').replaceAll("'", '');
       } else {
         // Try to load questions from asset file first
         final assetQuestions = await _loadQuestionsFromAsset();
@@ -253,10 +226,6 @@ class _MindfulMemosScreenState extends State<MindfulMemosScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Daily Nyx Nudge (at top)
-            const MindfulMemosDailyNudgeWidget(),
-            const SizedBox(height: 24),
-            
             // Question of the Day Section
             _buildQuestionOfTheDay(),
             const SizedBox(height: 16),
@@ -702,94 +671,3 @@ class _MindfulMemosScreenState extends State<MindfulMemosScreen> {
   }
 }
 
-class MindfulMemosDailyNudgeWidget extends StatefulWidget {
-  const MindfulMemosDailyNudgeWidget({super.key});
-
-  @override
-  State<MindfulMemosDailyNudgeWidget> createState() => _MindfulMemosDailyNudgeWidgetState();
-}
-
-class _MindfulMemosDailyNudgeWidgetState extends State<MindfulMemosDailyNudgeWidget> {
-  String? _dailyNudge;
-  bool _isLoading = true;
-
-  // Fallback nudge messages
-  static const List<String> fallbackMessages = [
-    "Remember to check in with yourself today. How are you feeling?",
-    "Take a moment to breathe deeply and notice what's around you.",
-    "Your feelings are valid, whatever they may be right now.",
-    "Small steps forward are still progress. You're doing great.",
-    "It's okay to have difficult days. Tomorrow is a new opportunity.",
-    "Remember to be kind to yourself today.",
-    "Your mental health matters. Take care of yourself.",
-    "You are stronger than you think, even on the hard days.",
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadDailyNudge();
-  }
-
-  Future<void> _loadDailyNudge() async {
-    try {
-      final userProvider = Provider.of<UserProvider>(context, listen: false);
-      final nudge = await APIService.getDailyNudge(userProvider.currentUserId);
-      
-      if (!mounted) return;
-      
-      setState(() {
-        _dailyNudge = nudge ?? fallbackMessages[DateTime.now().day % fallbackMessages.length];
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      
-      setState(() {
-        _dailyNudge = fallbackMessages[DateTime.now().day % fallbackMessages.length];
-        _isLoading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final message = _isLoading ? "Loading your daily nudge..." : (_dailyNudge ?? fallbackMessages[DateTime.now().day % fallbackMessages.length]);
-    
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Theme.of(context).colorScheme.primary,
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Daily Nyx Nudge',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.secondary,
-                  fontSize: 16,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            message,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              fontSize: 13,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

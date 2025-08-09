@@ -264,9 +264,9 @@ $conversationContext''';
     if (currentMode == 'comfort' && (contextType == 'emotion' || contextType == 'comfort' || contextType == 'general')) score += 2;
     
     // Specialized tool matching
-    if (currentMode == 'introspection' && (contextType == 'goal' || contextType == 'preference')) score += 2;
-    if (currentMode == 'trauma_patterns' && contextType == 'trigger') score += 3;
-    if (currentMode == 'attachment' && contextType == 'emotion') score += 2;
+    if (currentMode == 'guided_introspection' && (contextType == 'goal' || contextType == 'preference')) score += 2;
+    if (currentMode == 'childhood_trauma' && contextType == 'trigger') score += 3;
+    if (currentMode == 'attachment_patterns' && contextType == 'emotion') score += 2;
     
     // Cross-mode relevance for related contexts
     if ((currentMode == 'anxiety' || currentMode == 'depression') && contextType == 'coping_strategy') score += 2;

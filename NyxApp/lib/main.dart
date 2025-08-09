@@ -24,14 +24,7 @@ void main() async {
   
   // Load environment variables from system environment
   LoggingService.logInfo('✅ Environment variables access initialized');
-  
-  // Verify Claude API key is loaded from compile-time environment
-  const apiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-  if (apiKey != null && apiKey.isNotEmpty) {
-    LoggingService.logInfo('✅ Claude API key loaded successfully');
-  } else {
-    LoggingService.logError('❌ Claude API key not found or empty');
-  }
+  LoggingService.logInfo('✅ All requests now route through Render backend');
   
   // Initialize notification service
   await NotificationService.initialize();

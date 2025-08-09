@@ -137,65 +137,95 @@ class _OptimizedChatInputState extends State<OptimizedChatInput> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Expanded(
-          child: Container(
-            constraints: const BoxConstraints(maxHeight: 120),
-            child: GestureDetector(
-              onLongPress: () {
-                HapticFeedback.lightImpact();
-                _showTextOptions(context);
-              },
-              child: TextField(
-                controller: widget.controller,
-                focusNode: _focusNode,
-                style: Theme.of(context).textTheme.bodyMedium,
-                decoration: InputDecoration(
-                  hintText: widget.hintText,
-                  hintStyle: Theme.of(context).textTheme.bodyMedium,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(28),
-                    borderSide: BorderSide.none,
+    return Container(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Container(
+              constraints: const BoxConstraints(
+                minHeight: 56,
+                maxHeight: 160,
+              ),
+              child: GestureDetector(
+                onLongPress: () {
+                  HapticFeedback.lightImpact();
+                  _showTextOptions(context);
+                },
+                child: Scrollbar(
+                  child: TextField(
+                    controller: widget.controller,
+                    focusNode: _focusNode,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    decoration: InputDecoration(
+                      hintText: widget.hintText,
+                      hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(
+                          color: Theme.of(context).colorScheme.outline,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(
+                          color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(
+                          color: Theme.of(context).colorScheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor: Theme.of(context).colorScheme.surface,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                    ),
+                    textCapitalization: TextCapitalization.sentences,
+                    keyboardType: TextInputType.multiline,
+                    maxLines: null,
+                    minLines: 1,
+                    scrollPhysics: const BouncingScrollPhysics(),
+                    enabled: !widget.isLoading,
+                    onSubmitted: (_) => _handleSubmit(),
+                    onTap: widget.onTap,
+                    textInputAction: TextInputAction.newline,
                   ),
-                  filled: true,
-                  fillColor: Theme.of(context).colorScheme.surface,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                 ),
-                textCapitalization: TextCapitalization.sentences,
-                keyboardType: TextInputType.multiline,
-                maxLines: null,
-                minLines: 1,
-                enabled: !widget.isLoading,
-                onSubmitted: (_) => _handleSubmit(),
-                onTap: widget.onTap,
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Material(
-          color: widget.isLoading || !_hasText
-              ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.3)
-              : Theme.of(context).colorScheme.secondary,
-          shape: const CircleBorder(),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: widget.isLoading || !_hasText ? null : _handleSubmit,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Icon(
-                Icons.send,
-                size: 20,
-                color: widget.isLoading || !_hasText
-                    ? Colors.white.withValues(alpha: 0.5)
-                    : Colors.white,
+          const SizedBox(width: 8),
+          Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            child: Material(
+              color: widget.isLoading || !_hasText
+                  ? Theme.of(context).colorScheme.secondary.withValues(alpha: 0.3)
+                  : Theme.of(context).colorScheme.secondary,
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: widget.isLoading || !_hasText ? null : _handleSubmit,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Icon(
+                    Icons.send,
+                    size: 20,
+                    color: widget.isLoading || !_hasText
+                        ? Colors.white.withValues(alpha: 0.5)
+                        : Colors.white,
+                  ),
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

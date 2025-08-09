@@ -65,10 +65,10 @@ void main() async {
   if (await networkConfigFile.exists()) {
     final content = await networkConfigFile.readAsString();
     
-    if (content.contains('api.anthropic.com')) {
-      print('  ✅ Claude API domain configured');
+    if (content.contains('nyxapp.onrender.com')) {
+      print('  ✅ Render backend domain configured');
     } else {
-      print('  ❌ Claude API domain missing');
+      print('  ❌ Render backend domain missing');
       allChecksPass = false;
     }
   } else {

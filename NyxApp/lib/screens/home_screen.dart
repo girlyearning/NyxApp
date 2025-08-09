@@ -583,7 +583,7 @@ class HowAtypicalWidget extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _buildTypeOption(context, 'ADHD/Autism/AuDHD', 'adhd'),
+              _buildTypeOption(context, 'ADHD/Autism/AuDHD', 'adhd_nyx'),
               _buildTypeOption(context, 'Disordered (Mood, Personality)', 'disordered'),
               _buildTypeOption(context, 'Average Atypical', 'average'),
               _buildTypeOption(context, 'All of the Above', 'all'),

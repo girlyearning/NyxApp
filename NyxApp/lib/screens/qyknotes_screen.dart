@@ -163,6 +163,9 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
   }
 
   Future<void> _createFolder() async {
+    // Dismiss keyboard to prevent it from appearing during operation
+    FocusScope.of(context).unfocus();
+    
     final nameController = TextEditingController();
     
     final result = await showDialog<bool>(
@@ -183,7 +186,7 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLength: 50,
-              autofocus: true,
+              autofocus: false,
             ),
           ],
         ),
@@ -244,6 +247,9 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
   }
 
   Future<void> _showFoldersDialog() async {
+    // Dismiss keyboard to prevent it from appearing during operation
+    FocusScope.of(context).unfocus();
+    
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -407,6 +413,9 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
   }
 
   Future<void> _moveNoteToFolder(QykNote note) async {
+    // Dismiss keyboard to prevent it from appearing after operation
+    FocusScope.of(context).unfocus();
+    
     final result = await showDialog<String?>(
       context: context,
       builder: (context) => AlertDialog(
@@ -456,6 +465,9 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
   }
 
   Future<void> _deleteNote(QykNote note) async {
+    // Dismiss keyboard to prevent it from appearing after operation
+    FocusScope.of(context).unfocus();
+    
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -845,48 +857,6 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
     );
   }
 
-  Widget _buildFolderChip(String title, String folderId, int count, {QykFolder? folder}) {
-    final isSelected = false; // Folder selection removed
-    
-    return GestureDetector(
-      onTap: () {
-        // Folder selection removed
-      },
-      onLongPress: folder != null ? () => _showFolderOptions(folder) : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected 
-            ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: Theme.of(context).colorScheme.primary,
-            width: 1,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              folder != null ? Icons.folder : Icons.home,
-              size: 16,
-              color: isSelected ? Colors.white : Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              '$title ($count)',
-              style: TextStyle(
-                color: isSelected ? Colors.white : Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w500,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   void _showFolderOptions(QykFolder folder) {
     showModalBottomSheet(
@@ -926,7 +896,7 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
         final profileIcon = userProvider.selectedProfileIcon;
         
         return Card(
-          margin: const EdgeInsets.only(bottom: 12),
+          margin: const EdgeInsets.only(bottom: 8),
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -935,7 +905,7 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
             borderRadius: BorderRadius.circular(12),
             onTap: () => _showNoteOptions(note),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1015,35 +985,6 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
                       height: 1.4,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  // Footer with interaction hint
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.lightbulb,
-                        size: 16,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Qyk Note',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        'Tap for options',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[500],
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
@@ -1054,6 +995,9 @@ class _QykNotesScreenState extends State<QykNotesScreen> {
   }
 
   void _showNoteOptions(QykNote note) {
+    // Dismiss keyboard to prevent it from appearing after operations
+    FocusScope.of(context).unfocus();
+    
     showModalBottomSheet(
       context: context,
       builder: (context) => SafeArea(

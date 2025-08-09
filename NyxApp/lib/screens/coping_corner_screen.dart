@@ -5,8 +5,22 @@ import '../widgets/feature_grid.dart';
 import '../screens/coping_options_screen.dart';
 import '../screens/sensory_selfcare_screen.dart';
 
-class CopingCornerScreen extends StatelessWidget {
+class CopingCornerScreen extends StatefulWidget {
   const CopingCornerScreen({super.key});
+
+  @override
+  State<CopingCornerScreen> createState() => _CopingCornerScreenState();
+}
+
+class _CopingCornerScreenState extends State<CopingCornerScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Dismiss keyboard when entering this screen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FocusScope.of(context).unfocus();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -155,14 +169,6 @@ class CopingCornerScreen extends StatelessWidget {
                     'Discover and align with your core values',
                     Icons.compass_calibration,
                     'values',
-                  ),
-                  const SizedBox(height: 12),
-                  _buildSelfDiscoveryCard(
-                    context,
-                    'Mental Space Builders',
-                    'Store affirmations, memories, and coping strategies',
-                    Icons.psychology_alt,
-                    'mental_space',
                   ),
                   const SizedBox(height: 12),
                   _buildSelfDiscoveryCard(

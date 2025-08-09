@@ -74,11 +74,11 @@ class _PromptResponsesScreenState extends State<PromptResponsesScreen> {
       case 'introspective':
       case 'mental health':
         return const Color(0xFF6B73FF);
-      case 'adhd':
+      case 'adhd_nyx':
         return const Color(0xFF7aa5bf);
-      case 'asd':
+      case 'autistic_nyx':
         return const Color(0xFF8BB96E);
-      case 'audhd':
+      case 'autistic_adhd':
         return const Color(0xFFFF9CAE);
       default:
         return Colors.grey[600]!;
@@ -144,7 +144,6 @@ class _PromptResponsesScreenState extends State<PromptResponsesScreen> {
   }
 
   Widget _buildResponseCard(Map<String, dynamic> response) {
-    final createdAt = DateTime.parse(response['createdAt']);
     final promptType = response['promptType'] ?? 'general';
     final prompt = response['prompt'] ?? '';
     final responseText = response['response'] ?? '';

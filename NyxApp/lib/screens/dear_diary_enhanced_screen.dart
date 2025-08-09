@@ -150,7 +150,7 @@ class _DearDiaryEnhancedScreenState extends State<DearDiaryEnhancedScreen> {
                 border: OutlineInputBorder(),
               ),
               maxLength: 50,
-              autofocus: true,
+              autofocus: false,
             ),
           ],
         ),

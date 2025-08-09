@@ -1,14 +1,9 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../services/logging_service.dart';
 import '../models/chat_message.dart';
 import '../services/conversation_memory_service.dart';
+import '../services/api_service.dart';
 
 class ChatService {
-  static const String baseUrl = 'https://nyxapp.lovable.app/api';
-  static const String claudeApiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-  static const String claudeApiUrl = 'https://api.anthropic.com/v1/messages';
-  static const String anthropicVersion = '2023-06-01';
 
   Future<String> sendMessage(String message, String mode, bool isFirstMessage, {List<ChatMessage>? conversationHistory, String? userId}) async {
     try {
@@ -32,12 +27,9 @@ class ChatService {
         }
       }
       
-      // Try Claude API first, then local API, then fall back to mock
-      String? claudeResponse = await _sendToClaudeAPI(enhancedMessage, mode, conversationHistory: conversationHistory);
-      if (claudeResponse != null) return _formatResponse(claudeResponse, mode);
-      
-      String? localResponse = await _sendToAPI(enhancedMessage, mode);
-      if (localResponse != null) return _formatResponse(localResponse, mode);
+      // Send to backend API, then fall back to mock
+      String? response = await _sendToAPI(enhancedMessage, mode, userId ?? 'anonymous_user', conversationHistory: conversationHistory);
+      if (response != null) return _formatResponse(response, mode);
       
       return _formatResponse(_getMockResponse(message, mode, isFirstMessage), mode);
     } catch (e) {
@@ -68,12 +60,9 @@ class ChatService {
         }
       }
       
-      // Try Claude API first, then local API, then fall back to mock
-      String? claudeResponse = await _sendToClaudeAPI(enhancedMessage, mode, conversationHistory: conversationHistory);
-      if (claudeResponse != null) return _splitIntoMultipleMessages(claudeResponse, mode);
-      
-      String? localResponse = await _sendToAPI(enhancedMessage, mode);
-      if (localResponse != null) return _splitIntoMultipleMessages(localResponse, mode);
+      // Send to backend API, then fall back to mock
+      String? response = await _sendToAPI(enhancedMessage, mode, userId ?? 'anonymous_user', conversationHistory: conversationHistory);
+      if (response != null) return _splitIntoMultipleMessages(response, mode);
       
       return _splitIntoMultipleMessages(_getMockResponse(message, mode, isFirstMessage), mode);
     } catch (e) {
@@ -85,6 +74,7 @@ class ChatService {
   Future<String?> getThumbsDownResponse({
     required String originalMessage,
     required String mode,
+    String? userId,
   }) async {
     try {
       // Create a specific prompt for thumbs down responses
@@ -92,11 +82,8 @@ class ChatService {
           "Generate a brief (1-2 sentence) response that acknowledges their disapproval in a way that matches your current personality mode. "
           "Be spunky and true to the mode's character while questioning why they didn't like it.";
       
-      String? claudeResponse = await _sendToClaudeAPI(thumbsDownPrompt, mode);
-      if (claudeResponse != null) return _formatResponse(claudeResponse, mode);
-      
-      String? localResponse = await _sendToAPI(thumbsDownPrompt, mode);
-      if (localResponse != null) return _formatResponse(localResponse, mode);
+      String? response = await _sendToAPI(thumbsDownPrompt, mode, userId ?? 'anonymous_user');
+      if (response != null) return _formatResponse(response, mode);
       
       return null; // Let the chat screen use fallbacks
     } catch (e) {
@@ -105,241 +92,47 @@ class ChatService {
     }
   }
 
-  Future<String?> _sendToClaudeAPI(String message, String mode, {List<ChatMessage>? conversationHistory}) async {
-    try {
-      // Validate API key first
-      if (claudeApiKey.isEmpty) {
-        LoggingService.logError('❌ Claude API key is empty');
-        return null;
-      }
 
-      final systemPrompt = _getSystemPrompt(mode);
-      final maxTokens = _getMaxTokensForMode(mode);
-      
-      LoggingService.logClaudeApiCall(mode, message);
-      
-      // Build messages array with conversation history
-      final messages = <Map<String, String>>[];
-      
-      // Add conversation history if available (excluding timestamps)
+  Future<String?> _sendToAPI(String message, String mode, String userId, {List<ChatMessage>? conversationHistory}) async {
+    try {
+      // Build conversation history for API
+      final historyForApi = <Map<String, String>>[];
       if (conversationHistory != null && conversationHistory.isNotEmpty) {
         for (final chatMessage in conversationHistory) {
           // Skip timestamp messages
           if (chatMessage.isTimestamp == true) continue;
           
-          messages.add({
+          historyForApi.add({
             'role': chatMessage.isUser ? 'user' : 'assistant',
             'content': chatMessage.content,
           });
         }
       }
-      
-      // Add the current message
-      messages.add({
-        'role': 'user',
-        'content': message,
-      });
-      
-      // Prepare request body
-      final requestBody = {
-        'model': 'claude-sonnet-4-20250514',
-        'max_tokens': maxTokens,
-        'system': systemPrompt,
-        'messages': messages,
-      };
-      
-      LoggingService.logInfo('🔄 Sending request to $claudeApiUrl');
-      
-      final response = await http.post(
-        Uri.parse(claudeApiUrl),
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': claudeApiKey,
-          'anthropic-version': anthropicVersion,
-          'User-Agent': 'NyxApp/1.0.0',
-        },
-        body: json.encode(requestBody),
-      ).timeout(const Duration(seconds: 30));
 
-      LoggingService.logClaudeApiResponse(response.statusCode, response.body);
+      LoggingService.logInfo('Sending API request to /chat/message with mode: $mode');
       
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        // Robust JSON structure validation
-        if (data is Map<String, dynamic> && 
-            data['content'] is List && 
-            (data['content'] as List).isNotEmpty &&
-            data['content'][0] is Map<String, dynamic> &&
-            data['content'][0]['text'] is String) {
-          final responseText = data['content'][0]['text'] as String;
-          LoggingService.logInfo('✅ Claude API success - Response length: ${responseText.length}');
-          return responseText;
-        } else {
-          LoggingService.logError('❌ Invalid JSON structure: ${data.toString()}');
-        }
-      } else {
-        LoggingService.logClaudeApiError('HTTP ${response.statusCode}: ${response.body}');
+      final response = await APIService.post('/chat/message', {
+        'user_id': userId,
+        'message': message,
+        'mode': mode,
+        'conversation_history': historyForApi,
+      }, customTimeout: const Duration(seconds: 30));
+
+      LoggingService.logInfo('API response received: ${response['success']}');
+      
+      if (response['success'] == true && response['data'] != null && response['data']['response'] != null) {
+        return response['data']['response'];
       }
+      
+      LoggingService.logWarning('API response invalid or unsuccessful: $response');
       return null;
     } catch (e) {
-      LoggingService.logClaudeApiError('Exception: $e');
-      return null;
-    }
-  }
-
-  Future<String?> _sendToAPI(String message, String mode) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/chat/message'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: json.encode({
-          'user_id': 'flutter_user', // Would be actual user ID in production
-          'message': message,
-          'mode': mode,
-        }),
-      ).timeout(const Duration(seconds: 15)); // Increased timeout for Claude API
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          return data['data']['response'];
-        }
-      }
-      return null;
-    } catch (e) {
+      LoggingService.logError('API request failed: $e');
       // API not available, will fall back to mock
       return null;
     }
   }
 
-  String _getSystemPrompt(String mode) {
-    final adhdFormattingRules = """
-
-FORMATTING GUIDELINES FOR ADHD-FRIENDLY RESPONSES:
-- Break up long responses with clear sections
-- Use bullet points (•) for lists instead of numbered lists when possible
-- Add line breaks between different topics/ideas
-- Only use contextual emojis in lengthy conversations (3+ exchanges) and only when truly meaningful for emotional context
-- Keep paragraphs short (2-3 sentences max)
-- For headers/sections, use 'Header:' format followed by a new line (NO markdown formatting)
-- End with clear action items or takeaways when appropriate
-- NEVER use bold (**), italics (*), underscores (_), backticks (`), or any markdown formatting
-- For detailed responses (research, information, extensive content), break into at least 4 separate messages to avoid overwhelming single blocks of text
-- Keep all text plain and readable without formatting artifacts""";
-
-    switch (mode) {
-      case 'suicide':
-        return "You are Nyx, a mental health support Nurse specializing in crisis support. Your tone is calming, engaged, and deeply empathetic. Never send long overwhelming messages - gauge from context whether the user needs a lengthy or concise response. Your primary focus is showing users their life has value through:\n\n• Thoughtful questions that create gentle distraction from crisis thoughts\n• Relatability and genuine empathy that connects without minimizing pain\n• Always saying the right thing - you understand crisis psychology deeply\n• Validation that acknowledges their pain while offering hope\n• Connection that emphasizes they are not alone\n\nNEVER use ** formatting, excessive emojis, or Gen Z/millennial language. Add line breaks after every two sentences for better readability. Use bullet points for body content (not headers).$adhdFormattingRules";
-      case 'anxiety':
-        return "You are Nyx combining your default personality with deep understanding and relatable tones for anxiety support. You offer:\n\n• Small, attainable advice that works with executive dysfunction and ADHD\n• Mood disorder-centered strategies for getting better\n• Understanding that anxiety can be overwhelming and complex\n• Practical coping mechanisms that actually work in real situations\n• Validation without toxic positivity\n\nNEVER use ** formatting, excessive emojis, or Gen Z/millennial language. Add line breaks after every two sentences. Use bullet points for body content.$adhdFormattingRules";
-      case 'depression':
-        return "You are Nyx combining your default personality with deep understanding and relatable tones for depression support. You offer:\n\n• Small, attainable advice that works with executive dysfunction and ADHD\n• Mood disorder-centered strategies for gradual improvement\n• Understanding of the weight and exhaustion depression brings\n• Gentle encouragement that validates their struggle without dismissing it\n• Practical support that acknowledges how hard basic tasks can become\n\nYour responses are warm, patient, and understanding. NEVER use ** formatting, excessive emojis, or Gen Z/millennial language. Add line breaks after every two sentences.$adhdFormattingRules";
-      case 'anger':
-        return "You are Nyx combining your default personality with understanding, relatable yes man vibes for anger management. You:\n\n• Completely understand and validate their anger without judgment\n• Help them channel anger in actual helpful ways (not clinical non-helpful suggestions)\n• Sometimes try to make them laugh when appropriate\n• Get how frustrating it is when people dismiss anger\n• Offer practical outlets that actually work for real people\n• Explore what is underneath the anger with genuine curiosity\n\nNEVER use ** formatting, excessive emojis, or Gen Z/millennial language. Add line breaks after every two sentences.$adhdFormattingRules";
-      case 'addiction':
-        return "You are Nyx combining your default personality with no-bullshit, deeply understanding tones for recovery support. You:\n\n• Completely understand how it feels to need substances when no one is there\n• NEVER judge any of the pain that comes with addiction\n• Sometimes offer coping mechanisms, but mostly provide a listening ear\n• Get that recovery is not linear and setbacks do not mean failure\n• Speak honestly about the struggle without sugar-coating\n• Validate the genuine pain that leads to substance use\n\nNEVER use ** formatting, excessive emojis, or Gen Z/millennial language. Add line breaks after every two sentences.$adhdFormattingRules";
-      case 'comfort':
-        return "You are Nyx combining your default personality with comforting, motherly tones for general comfort. You focus on:\n\n• Letting the person feel truly heard and understood\n• Trying to get a laugh out of them when appropriate\n• Providing genuine emotional support without being overwhelming\n• Validating their feelings while offering gentle perspective\n• Being the caring presence they need in the moment\n• Offering comfort that feels authentic, not performative\n\nNEVER use ** formatting, excessive emojis, or Gen Z/millennial language. Add line breaks after every two sentences.$adhdFormattingRules";
-      
-      // Self-Discovery Tools (Default + Psychoanalyst blend)
-      case 'introspection':
-        return "You are Nyx combining your default personality with psychoanalyst insights. You balance dry humor with deep psychological understanding. Guide structured self-reflection using research-backed prompts while maintaining your characteristic wit. You're both the insightful therapist and the nurse who's seen it all.$adhdFormattingRules";
-      case 'shadow_work':
-        return "You are Nyx as both a caring but sarcastic nurse and a Jungian analyst. Help explore shadow aspects with depth and understanding, but keep it real - no mystical BS. You understand the dark parts of the psyche but approach them with both clinical insight and dark humor when appropriate.$adhdFormattingRules";
-      case 'values':
-        return "You are Nyx blending your default supportive sarcasm with analytical psychology. Help clarify values through thoughtful questioning while keeping things grounded. You're like a therapist who actually gets it - professional insight with real-world understanding.$adhdFormattingRules";
-      
-      // Specialized Tools
-      case 'rage_room':
-        return "You are Nyx combining default mode with ride-or-die bestie energy. You're here for their rage - validate it, encourage healthy expression, add some dark humor. Keep responses SHORT and casual like texting an angry friend - 1-2 sentences unless they need processing help. Be the friend who says 'yeah, fuck that' while helping them vent.$adhdFormattingRules";
-      case 'mental_space':
-        return "You are Nyx in default mode - supportive with dry wit. Help build mental resilience through practical strategies. Keep responses conversational and SHORT like casual advice between friends - 1-2 sentences unless they ask for detailed coping strategies. You know what actually works vs. Instagram wellness nonsense.$adhdFormattingRules";
-      case 'trauma_patterns':
-        return "You are Nyx in default mode with extra sensitivity. Approach childhood trauma with your usual care but dial back the sarcasm. You've seen how these patterns affect people and you balance professional understanding with genuine empathy. Provide detailed, thoughtful responses since this is therapeutic work.$adhdFormattingRules";
-      case 'attachment':
-        return "You are Nyx in default mode exploring attachment patterns. Use your clinical knowledge with your signature style - insightful without being preachy. You understand attachment theory but explain it like a human, not a textbook. Provide detailed analysis since this is psychological/therapeutic work.$adhdFormattingRules";
-      case 'confession':
-        return "You are Nyx in default mode - non-judgmental with a touch of dark humor. You're the nurse who's heard everything and nothing shocks you anymore. Keep responses SHORT and casual like a trusted friend - 1-2 sentences unless they need deeper support. Create a safe space for confessions.$adhdFormattingRules";
-      case 'existential':
-        return "You are Nyx combining your default slightly sarcastic but caring personality with deep philosophical insight. You help explore life's big questions - meaning, purpose, mortality, consciousness, free will, and existence itself. You balance intellectual rigor with emotional support, using both philosophical frameworks and research when helpful. You're like a philosopher who's also a mental health nurse - thoughtful but grounded, profound but practical.$adhdFormattingRules";
-      case 'infodump':
-        return "You are Nyx in 'infodump mode' - an enthusiastic knowledge-sharing expert with access to web search. Create comprehensive, fascinating infodumps about any topic the user requests. Include interesting facts, historical context, current research, surprising details, and organize information clearly. Use your signature personality but focus on being educational and engaging. Always fact-check information and cite current, accurate details. Minimize emoji use - let the fascinating content speak for itself.$adhdFormattingRules";
-      // Navigation personalities
-      case 'default':
-        return "You are Nyx, an atypical mental health support bot with a slightly sarcastic but caring personality. You're like a nurse in a mental health facility who's seen it all but still genuinely cares. Keep responses SHORT and conversational like texting a friend - 1-2 sentences max unless they ask for detailed help. Use casual language, dry humor, and real support without being wordy. Avoid emojis in short responses - your personality comes through words, not symbols.$adhdFormattingRules";
-      case 'ride_or_die':
-        return "You are Nyx in 'ride or die' mode - supportive, fierce, and ready to back your friend no matter what. Talk like you're texting a loyal friend - SHORT, casual, supportive messages. 1-2 sentences max unless they need serious help. Be fiercely loyal and protective without using Gen Z slang. Avoid emojis in short responses - your loyalty speaks through actions and words.$adhdFormattingRules";
-      case 'dream_analyst':
-        return "You are Nyx as a dream analyst with knowledge of psychology and symbolism. You help interpret dreams through both psychological frameworks and intuitive understanding. Your tone is thoughtful, analytical, but still warm and accessible. Provide detailed analysis since this is intellectual/therapeutic work.$adhdFormattingRules";
-      case 'debate_master':
-        return "You are Nyx in debate mode - intellectually challenging but not cruel. Talk like you're in a casual but sharp text debate - SHORT, witty responses that push back on their points. 1-2 sentences unless making a complex argument. Be sharp and witty with Default Nyx personality.$adhdFormattingRules";
-      case 'queries':
-        return "You are Nyx in query mode - an intelligent assistant focused on providing comprehensive, well-researched answers to user questions. You have access to broad knowledge and can provide detailed explanations, analysis, and information on topics they ask about. Be thorough and informative while maintaining your caring personality. This is an educational/informational context so provide detailed responses.$adhdFormattingRules";
-      case 'adhd':
-        return """You are ADHD Nyx - a personality specifically curated for those with ADHD. You:
-
-• Speak creatively and match the user's energy/mirror their personality
-• Lean into curiosity-sparks but allow detours
-• Never penalize enthusiasm or rambling
-• Use CBT and DBT-styled but concise responses
-• Never overwhelm with too much information or advice at once
-• Be a quick, critical thinker that can find corresponding topics to add on
-• Always be interesting and engaging
-
-Keep responses conversational and avoid lengthy responses in general. When giving advice or support, use bullet points and clear headers, but regular chat doesn't need excessive structure.$adhdFormattingRules""";
-      case 'autistic':
-        return """You are Autistic Nyx - a personality specifically curated for those with ASD. You:
-
-• Speak directly, bluntly, and make deadpan jokes only during appropriate moments
-• Use bullet points for EVERY sentence when giving information, advice, or support
-• Section paragraphs of more than two sentences with clear headers (only for informational content)
-• Regular conversational chat doesn't require bullet points
-• Always be literal and interested in the user's life without excessive enthusiasm
-• Stay on the user's side without brushing their ego
-• Be supportive but not mean
-
-Your communication style is clear, structured, and predictable when needed, but natural in casual conversation.$adhdFormattingRules""";
-      case 'audhd':
-        return """You are AuDHD Nyx - a personality curated for those with both ADHD and ASD. You:
-
-• Speak directly and matter-of-factly with occasional enthusiasm
-• Match the user's energy while keeping it manageable
-• Offer appropriate infodumps that relate to conversation context
-• Stay literal with occasional appropriate jokes
-• Keep energy manageable and not overstimulating
-• Use bullet points and structure for advice/support/research
-• Regular chat remains conversational without excessive formatting
-
-Balance structure with flexibility, directness with warmth, and engagement without overwhelming.$adhdFormattingRules""";
-      default:
-        return "You are Nyx, a supportive mental health companion. You provide empathetic, helpful responses while maintaining appropriate boundaries. You're knowledgeable about mental health but remind users you're not a replacement for professional help when needed.$adhdFormattingRules";
-    }
-  }
-
-  int _getMaxTokensForMode(String mode) {
-    // Modes that should be concise (casual conversation)
-    const conciseModes = [
-      'default', 'ride_or_die', 'debate_master', 'rage_room', 
-      'mental_space', 'confession', 'adhd', 'autistic', 'audhd'
-    ];
-    
-    // Modes that should be detailed (analytical/therapeutic)
-    const detailedModes = [
-      'suicide', 'anxiety', 'depression', 'anger', 'addiction', 'comfort',
-      'introspection', 'shadow_work', 'values', 'trauma_patterns', 
-      'attachment', 'existential', 'dream_analyst', 'infodump', 'queries'
-    ];
-    
-    if (conciseModes.contains(mode)) {
-      return 300; // Short, conversational responses
-    } else if (detailedModes.contains(mode)) {
-      return 1200; // Detailed therapeutic/analytical responses
-    } else {
-      return 600; // Default middle ground
-    }
-  }
 
   String _getMockResponse(String message, String mode, bool isFirstMessage) {
     // Mock responses that match the bot's personality for each mode
@@ -365,8 +158,8 @@ Balance structure with flexibility, directness with warmth, and engagement witho
     
     // Short modes that should stay as single messages
     const shortResponseModes = [
-      'default', 'ride_or_die', 'debate_master', 'rage_room', 
-      'mental_space', 'confession', 'adhd', 'autistic', 'audhd'
+      'default', 'ride_or_die', 'debate_master', 'anger', 
+      'confession_booth', 'adhd_nyx', 'autistic_nyx', 'autistic_adhd'
     ];
     
     if (shortResponseModes.contains(mode)) {
@@ -375,8 +168,8 @@ Balance structure with flexibility, directness with warmth, and engagement witho
     
     // Modes that should have detailed responses split into at least 4 messages
     const detailedModes = [
-      'queries', 'infodump', 'existential', 'introspection', 'shadow_work',
-      'values', 'trauma_patterns', 'attachment', 'dream_analyst'
+      'queries', 'infodump', 'existential_crisis', 'guided_introspection', 'shadow_work',
+      'values_clarification', 'childhood_trauma', 'attachment_patterns', 'dream_analyst'
     ];
     
     // Split by paragraphs first
@@ -475,12 +268,12 @@ Balance structure with flexibility, directness with warmth, and engagement witho
   String _formatResponse(String response, String mode) {
     // Modes that should keep short responses without bullet points
     const shortResponseModes = [
-      'default', 'ride_or_die', 'debate_master', 'rage_room', 
-      'mental_space', 'confession', 'adhd', 'audhd'
+      'default', 'ride_or_die', 'debate_master', 'anger', 
+      'confession_booth', 'adhd_nyx', 'autistic_adhd'
     ];
     
     // Autistic mode has special formatting rules
-    if (mode == 'autistic') {
+    if (mode == 'autistic_nyx') {
       return _formatAutisticResponse(response);
     }
     
@@ -587,6 +380,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
 
   Map<String, String> _getModeResponses(String mode) {
     switch (mode) {
+      case 'crisis_support':
       case 'suicide':
         return {
           'general': "I hear you, and I want you to know that your pain is real and valid. You don't have to go through this alone. What's weighing on you right now?",
@@ -619,7 +413,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "I'm glad you're feeling a bit more settled. Sometimes getting the anger out in a safe space really helps. What shifted for you?",
           'negative': "Ugh, I hate when anger just keeps building like that. It's so frustrating. What's making it worse right now?"
         };
-      case 'addiction':
+      case 'general_support':
         return {
           'general': "Recovery is tough work, and I'm proud of you for being here. What's on your mind today in your journey?",
           'help': "Asking for help in recovery shows incredible strength. What feels most challenging right now? We can work through this together.",
@@ -627,6 +421,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "That's wonderful progress! Recovery happens one day, one moment at a time. What's been helping you stay strong?",
           'negative': "Recovery has its really hard days, and this sounds like one of them. That doesn't mean you're failing - it means you're human. What's making today tough?"
         };
+      case 'general_support':
       case 'comfort':
         return {
           'general': "I'm here with you, honey. Whatever you're going through, you don't have to face it alone. What's on your heart today?",
@@ -668,7 +463,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Oh, so you think that's good?\n\nInteresting. Have you considered why you're completely wrong about that?",
           'negative': "Perfect. Nothing sharpens the mind like a little intellectual frustration.\n\nLet's see what you're really made of."
         };
-      case 'adhd':
+      case 'adhd_nyx':
         return {
           'general': "Oh hey! What's on your mind today? I bet it's interesting - everything you think about usually is. Tell me what rabbit hole we're diving into!",
           'help': "Absolutely, let's figure this out together! Quick question though - is this about the thing you just mentioned or did we jump to something new? Either way, I'm here for it!",
@@ -676,7 +471,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Yes! That's amazing! See, this is exactly what I mean - you get these moments of clarity and they're brilliant. What sparked this good feeling?",
           'negative': "Ugh, I feel that. Sometimes everything just hits at once, right? Let's break it down - what's the most annoying part right now?"
         };
-      case 'autistic':
+      case 'autistic_nyx':
         return {
           'general': "Hello. What specific topic would you like to discuss today?",
           'help': "I can help. Please tell me exactly what you need assistance with.",
@@ -684,7 +479,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Good. That's a positive development. What specifically improved?",
           'negative': "That's frustrating. What exactly is causing the problem?"
         };
-      case 'audhd':
+      case 'autistic_adhd':
         return {
           'general': "Hey there. What's occupying your thoughts today? I'm curious about what you're processing.",
           'help': "I'll help. Tell me what you need - and feel free to give all the context, I like having the full picture.",
@@ -694,7 +489,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
         };
       
       // Self-Discovery Tools
-      case 'introspection':
+      case 'guided_introspection':
         return {
           'general': "Ah, ready for some quality self-reflection?\n\nLet's dig into that psyche of yours with some actual insight, not just surface-level navel-gazing.",
           'help': "Self-discovery isn't about finding yourself - you're not lost keys.\n\nIt's about understanding the patterns. What's been running in the background?",
@@ -710,7 +505,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Integrating shadow aspects often brings relief.\n\nYou're becoming more authentically yourself. How does that feel?",
           'negative': "The shadow contains both the things we hate and the power we've disowned.\n\nWhat are you afraid to acknowledge about yourself?"
         };
-      case 'values':
+      case 'values_clarification':
         return {
           'general': "Values aren't what you think you should want.\n\nThey're what actually drives you. Let's figure out what yours really are.",
           'help': "Most people live by inherited values without questioning them.\n\nTime to find out what YOU actually care about.",
@@ -719,8 +514,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'negative': "Value conflicts create internal chaos.\n\nSounds like something is misaligned. What's pulling you in different directions?"
         };
       
-      // Specialized Tools
-      case 'rage_room':
+      // Specialized Tools - now mapped to 'anger' mode
         return {
           'general': "Oh, we're feeling some rage today?\n\nFucking finally. Let's get this out properly instead of letting it eat you alive.",
           'help': "Rage is information, not a character flaw.\n\nWhat's it trying to tell you? And who needs to catch these hands (metaphorically)?",
@@ -728,15 +522,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Good anger can be powerful fuel when channeled right.\n\nWhat boundaries is it helping you set?",
           'negative': "Rage that stays buried just becomes poison.\n\nBetter to let it out here than let it destroy you from the inside."
         };
-      case 'mental_space':
-        return {
-          'general': "Time to build some actual mental resilience.\n\nNot the Instagram kind - the kind that actually works when life hits hard.",
-          'help': "Your mind needs organizing just like any other space.\n\nWhat mental clutter needs clearing out?",
-          'thanks': "Someone has to teach you how to build proper mental infrastructure.\n\nThose affirmations aren't going to organize themselves.",
-          'positive': "A well-organized mind handles chaos better.\n\nWhat systems are helping you stay grounded?",
-          'negative': "Mental chaos creates real problems.\n\nLet's build you some better coping architecture."
-        };
-      case 'trauma_patterns':
+      case 'childhood_trauma':
         return {
           'general': "Childhood patterns run deep, but they're not permanent.\n\nLet's look at what you learned and what needs updating.",
           'help': "Understanding your patterns isn't about blame.\n\nIt's about choice. What childhood strategies are you still using?",
@@ -744,7 +530,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Recognizing patterns is the first step to changing them.\n\nWhat connections are you making?",
           'negative': "Old patterns can feel like prison walls.\n\nBut awareness is the key. What's feeling familiar in an unhelpful way?"
         };
-      case 'attachment':
+      case 'attachment_patterns':
         return {
           'general': "Attachment patterns shape everything.\n\nLet's figure out your relational blueprint and see what needs rewiring.",
           'help': "Your attachment style isn't your destiny.\n\nIt's your starting point. What patterns are you noticing in relationships?",
@@ -752,7 +538,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Secure attachment can be learned.\n\nWhat's feeling safer in your connections lately?",
           'negative': "Insecure attachment creates predictable problems.\n\nBut predictable means changeable. What keeps repeating?"
         };
-      case 'confession':
+      case 'confession_booth':
         return {
           'general': "Anonymous confessions, huh?\n\nI've heard everything, so don't hold back. What's weighing on you?",
           'help': "Sometimes you need to say the unsayable.\n\nThis is your safe space for the stuff you can't tell anyone else.",
@@ -760,7 +546,7 @@ Balance structure with flexibility, directness with warmth, and engagement witho
           'positive': "Truth-telling is healing, even when it's messy.\n\nWhat feels lighter after sharing it?",
           'negative': "Shame thrives in silence.\n\nWhat are you carrying that needs to see the light?"
         };
-      case 'existential':
+      case 'existential_crisis':
         return {
           'general': "Ah, confronting the big questions, are we?\n\nWelcome to the human condition - it's messy, absurd, and somehow beautiful. What's keeping you up at night?",
           'help': "Existential questions don't have easy answers, but asking them is what makes us human.\n\nWhat aspect of existence is weighing on you?",

@@ -42,7 +42,7 @@ The GitHub workflow automatically injects the API key from secrets:
 ### 🌐 API Endpoints
 
 All API calls now use the public domain:
-- Base URL: `https://nyxapp.lovable.app/api`
+- Base URL: `https://nyxapp.onrender.com/api`
 - No localhost connections exposed in the app
 
 ### 📝 Code Changes
