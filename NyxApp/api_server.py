@@ -59,10 +59,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware - LOCKED DOWN TO PRODUCTION DOMAIN
+# CORS middleware - Configurable via environment variable
+# Get allowed origins from environment variable, default to nyxapp.lovable.app
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'https://nyxapp.lovable.app').split(',')
+logger.info(f"CORS allowed origins: {ALLOWED_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://nyxapp.onrender.com"],  # Only allow production domain
+    allow_origins=ALLOWED_ORIGINS,  # Uses environment variable or default
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
