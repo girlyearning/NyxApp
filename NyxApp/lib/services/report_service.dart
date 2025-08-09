@@ -95,7 +95,7 @@ class ReportService {
           'Content-Type': 'application/json',
         },
         body: jsonEncode(formspreeData),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
       
       LoggingService.logInfo('Formspree response: ${response.statusCode}');
       return response.statusCode == 200 || response.statusCode == 302;
@@ -128,7 +128,7 @@ class ReportService {
           'value2': reportData['chat_type'],
           'value3': _buildEmailMessage(reportData),
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
       
       LoggingService.logInfo('Webhook response: ${response.statusCode}');
       return response.statusCode >= 200 && response.statusCode < 300;

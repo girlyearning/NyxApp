@@ -118,7 +118,7 @@ class ChatService {
         'message': message,
         'mode': mode,
         'conversation_history': historyForApi,
-      }, customTimeout: const Duration(seconds: 30));
+      }, customTimeout: const Duration(seconds: 60));
 
       LoggingService.logInfo('API response received successfully');
       

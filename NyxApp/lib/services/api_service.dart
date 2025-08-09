@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 class APIService {
   static const String baseUrl = 'https://nyxapp.onrender.com/api';
-  static const Duration timeout = Duration(seconds: 5);
+  static const Duration timeout = Duration(seconds: 60);
 
   // General HTTP methods
   static Future<Map<String, dynamic>> get(String endpoint) async {
@@ -344,7 +344,7 @@ class APIService {
       final response = await http.get(
         Uri.parse('${baseUrl.replaceAll('/api', '')}/health'),
         headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 3));
+      ).timeout(const Duration(seconds: 30));
 
       return response.statusCode == 200;
     } catch (e) {
