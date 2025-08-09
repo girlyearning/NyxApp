@@ -2,8 +2,8 @@ services:
   - type: web
     name: nyx-api-server
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python3 api_server.py
+    buildCommand: cd NyxApp/src && pip install -r requirements.txt
+    startCommand: cd NyxApp/src && python3 api_server.py
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
