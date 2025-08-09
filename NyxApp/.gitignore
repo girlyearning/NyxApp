@@ -127,3 +127,18 @@ debug_logs/
 *.backup
 *.bak
 *~
+
+# Exclude old projects from git tracking (parent directory)
+../Nyx/
+../Pikabug/
+../ReplyBot/
+../UnscramblerBot/
+../get-pip.py
+../greet_user.py
+../hello.py
+../keep_alive.py
+../README.md
+
+# GitHub CLI download
+gh_*.zip
+gh_*/
