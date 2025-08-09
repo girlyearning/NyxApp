@@ -8,6 +8,6 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ALLOWED_ORIGINS
-        value: https://nyxapp.lovable.app
+        value: "*"
       - key: PORT
         value: 10000

@@ -60,8 +60,8 @@ app = FastAPI(
 )
 
 # CORS middleware - Configurable via environment variable
-# Get allowed origins from environment variable, default to nyxapp.lovable.app
-ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', 'https://nyxapp.lovable.app').split(',')
+# Get allowed origins from environment variable, default to * for mobile app support
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '*').split(',')
 logger.info(f"CORS allowed origins: {ALLOWED_ORIGINS}")
 
 app.add_middleware(
