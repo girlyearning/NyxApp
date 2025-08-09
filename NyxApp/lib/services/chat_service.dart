@@ -33,6 +33,7 @@ class ChatService {
       
       return _formatResponse(_getMockResponse(message, mode, isFirstMessage), mode);
     } catch (e) {
+      LoggingService.logError('Chat service error in sendMessage: $e');
       // Fall back to mock responses if APIs are unavailable
       return _formatResponse(_getMockResponse(message, mode, isFirstMessage), mode);
     }
@@ -66,6 +67,7 @@ class ChatService {
       
       return _splitIntoMultipleMessages(_getMockResponse(message, mode, isFirstMessage), mode);
     } catch (e) {
+      LoggingService.logError('Chat service error in sendMultipleMessages: $e');
       // Fall back to mock responses if APIs are unavailable
       return _splitIntoMultipleMessages(_getMockResponse(message, mode, isFirstMessage), mode);
     }
@@ -118,16 +120,18 @@ class ChatService {
         'conversation_history': historyForApi,
       }, customTimeout: const Duration(seconds: 30));
 
-      LoggingService.logInfo('API response received: ${response['success']}');
+      LoggingService.logInfo('API response received successfully');
       
-      if (response['success'] == true && response['data'] != null && response['data']['response'] != null) {
+      // APIService.post already validates success field and throws on errors
+      // Just check for the response data structure
+      if (response['data'] != null && response['data']['response'] != null) {
         return response['data']['response'];
       }
       
-      LoggingService.logWarning('API response invalid or unsuccessful: $response');
+      LoggingService.logWarning('API response missing expected data structure: $response');
       return null;
     } catch (e) {
-      LoggingService.logError('API request failed: $e');
+      LoggingService.logError('API request failed in _sendToAPI: $e');
       // API not available, will fall back to mock
       return null;
     }

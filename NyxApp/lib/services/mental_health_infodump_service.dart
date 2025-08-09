@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
+import 'logging_service.dart';
 
 class MentalHealthInfodumpService {
   static const String _infodumpPrefix = 'mental_health_infodump_';
@@ -58,11 +59,13 @@ class MentalHealthInfodumpService {
         topic: topic,
       );
       
+      // APIService.generateInfodump returns data['data'] directly
       if (response != null && response['content'] != null) {
         return response['content'];
       }
       return _getFallbackContent(topicKey);
     } catch (e) {
+      LoggingService.logError('Failed to generate infodump content for $topic: $e');
       return _getFallbackContent(topicKey);
     }
   }

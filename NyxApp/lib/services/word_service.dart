@@ -52,14 +52,14 @@ class WordService {
     // Fallback: Try backend API
     try {
       final response = await APIService.get('/words/common');
-      if (response['success'] == true) {
+      if (response['success'] == true && response['data'] != null && response['data']['words'] != null) {
         _commonWords = List<String>.from(response['data']['words']);
         _allValidWords = _commonWords; // Use same for validation
         _isLoaded = true;
         return;
       }
     } catch (e) {
-      // API not available
+      LoggingService.logError('Failed to load common words from API: $e');
     }
     
     // Fallback: Generate words using backend API
@@ -69,7 +69,7 @@ class WordService {
         'minLength': 4,
         'maxLength': 6,
       });
-      if (response['success'] == true) {
+      if (response['success'] == true && response['data'] != null && response['data']['words'] != null) {
         final words = List<String>.from(response['data']['words']);
         _commonWords = words;
         _allValidWords = words; // Use same for validation
@@ -77,7 +77,7 @@ class WordService {
         return;
       }
     } catch (e) {
-      // Backend API failed
+      LoggingService.logError('Failed to generate words from API: $e');
     }
     
     // Final fallback: Use hardcoded common words (4-6 letters) - easier for 8th-9th grade level
@@ -237,12 +237,12 @@ class WordService {
           'prefix': prefix,
           'count': 10,
         });
-        if (response['success'] == true) {
+        if (response['success'] == true && response['data'] != null && response['data']['words'] != null) {
           final words = List<String>.from(response['data']['words']);
           prefixWords.addAll(words);
         }
       } catch (e) {
-        // Backend API failed, use what we have
+        LoggingService.logError('Failed to generate prefix words from API: $e');
       }
     }
     
@@ -269,11 +269,12 @@ class WordService {
       final response = await APIService.post('/words/validate', {
         'word': word,
       });
-      if (response['success'] == true) {
+      if (response['success'] == true && response['data'] != null) {
         return response['data']['isValid'] ?? false;
       }
       return false;
     } catch (e) {
+      LoggingService.logError('Failed to validate word with backend: $e');
       return false;
     }
   }

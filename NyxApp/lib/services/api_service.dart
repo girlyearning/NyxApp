@@ -18,13 +18,20 @@ class APIService {
         throw Exception('HTTP ${response.statusCode}');
       }
 
-      // Validate Content-Type header
+      // Validate Content-Type header (allow charset parameter)
       final contentType = response.headers['content-type'];
       if (contentType == null || !contentType.contains('application/json')) {
         throw Exception('Invalid Content-Type: $contentType');
       }
 
-      return json.decode(response.body);
+      final decoded = json.decode(response.body);
+      
+      // Validate response structure
+      if (decoded is Map<String, dynamic> && decoded['success'] != true) {
+        throw Exception('API returned error: ${decoded['message'] ?? 'Unknown error'}');
+      }
+      
+      return decoded;
     } catch (e) {
       throw Exception('GET request failed: $e');
     }
@@ -44,13 +51,20 @@ class APIService {
         throw Exception('HTTP ${response.statusCode}');
       }
 
-      // Validate Content-Type header
+      // Validate Content-Type header (allow charset parameter)
       final contentType = response.headers['content-type'];
       if (contentType == null || !contentType.contains('application/json')) {
         throw Exception('Invalid Content-Type: $contentType');
       }
 
-      return json.decode(response.body);
+      final decoded = json.decode(response.body);
+      
+      // Validate response structure
+      if (decoded is Map<String, dynamic> && decoded['success'] != true) {
+        throw Exception('API returned error: ${decoded['message'] ?? 'Unknown error'}');
+      }
+      
+      return decoded;
     } catch (e) {
       throw Exception('POST request failed: $e');
     }
@@ -68,13 +82,20 @@ class APIService {
         throw Exception('HTTP ${response.statusCode}');
       }
 
-      // Validate Content-Type header
+      // Validate Content-Type header (allow charset parameter)
       final contentType = response.headers['content-type'];
       if (contentType == null || !contentType.contains('application/json')) {
         throw Exception('Invalid Content-Type: $contentType');
       }
 
-      return json.decode(response.body);
+      final decoded = json.decode(response.body);
+      
+      // Validate response structure
+      if (decoded is Map<String, dynamic> && decoded['success'] != true) {
+        throw Exception('API returned error: ${decoded['message'] ?? 'Unknown error'}');
+      }
+      
+      return decoded;
     } catch (e) {
       throw Exception('DELETE request failed: $e');
     }
@@ -123,7 +144,7 @@ class APIService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['success'] == true) {
+        if (data['success'] == true && data['data'] != null && data['data']['history'] != null) {
           return List<Map<String, dynamic>>.from(data['data']['history']);
         }
       }
@@ -144,7 +165,7 @@ class APIService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['success'] == true) {
+        if (data['success'] == true && data['data'] != null && data['data']['nudge'] != null) {
           return data['data']['nudge'];
         }
       }
@@ -306,7 +327,7 @@ class APIService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (data['success'] == true) {
+        if (data['success'] == true && data['data'] != null && data['data']['response'] != null) {
           return data['data']['response'];
         }
       }
