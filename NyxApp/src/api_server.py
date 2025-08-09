@@ -185,7 +185,12 @@ async def root():
 @app.get("/health")
 @app.head("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now().isoformat(),
+        "anthropic_client_initialized": anthropic_client is not None,
+        "anthropic_api_key_present": ANTHROPIC_API_KEY is not None and len(ANTHROPIC_API_KEY) > 0 if ANTHROPIC_API_KEY else False
+    }
 
 # User Management Endpoints
 @app.post("/api/users/register", response_model=APIResponse)
